@@ -462,18 +462,55 @@
         }
 
         // --- 模式 1：JSON 輪詢機制 ---
+        // 支援雙路徑偵測：
+        //   A) HTTP 伺服器環境：使用 fetch() 讀取 speaking_state.json
+        //   B) 本機 file:// 環境：動態載入 speaking_state.js (window.speakingState) 繞過 CORS 限制
+        let corsMode = null; // null=尚未判斷, 'fetch'=常規, 'script'=JS檔降級
+        let lastScriptTimestamp = 0; // 防止重複處理同一狀態
+
         async function pollStateFile() {
             if (mode !== "JSON") return;
-            try {
-                // 讀取相對路徑下的 speaking_state.json 狀態檔
-                const response = await fetch('../player_profile/speaking_state.json', { cache: "no-store" });
-                if (response.ok) {
-                    const data = await response.json();
-                    updateSpeechState(data.speaking, data.text);
+            
+            // 嘗試 fetch，失敗則降級為動態載入 JS 
+            if (corsMode !== 'script') {
+                try {
+                    const response = await fetch('../player_profile/speaking_state.json', { cache: "no-store" });
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (corsMode !== 'fetch') {
+                            corsMode = 'fetch';
+                            modeToggle.innerText = "模式: JSON 輪詢偵測 (點擊切換語音觸發模式)";
+                        }
+                        updateSpeechState(data.speaking, data.text);
+                        return;
+                    }
+                } catch (error) {
+                    // fetch 失敗 (CORS / 檔案尚未生成)——自動切換 JS 降級方案
+                    if (corsMode !== 'script') {
+                        corsMode = 'script';
+                        modeToggle.innerText = "模式: JS 載入偵測 (本機檔案模式)";
+                        modeToggle.style.color = "var(--gemini-cyan)";
+                    }
                 }
-            } catch (error) {
-                // 靜默捕捉，可能是因為尚未生成或本地跨域限制
-                console.log("正在等待實況助理引擎寫入狀態檔...");
+            }
+            
+            // 降級方案：動態載入 speaking_state.js script tag
+            if (corsMode === 'script') {
+                // 移除舊的 script tag (IF EXISTS)
+                const old = document.getElementById('speaking-state-script');
+                if (old) old.remove();
+                
+                // 對時間戳進行綺串确保不被的快取
+                const script = document.createElement('script');
+                script.id = 'speaking-state-script';
+                script.src = `../player_profile/speaking_state.js?t=${Date.now()}`;
+                script.onload = () => {
+                    if (window.speakingState && window.speakingState.timestamp !== lastScriptTimestamp) {
+                        lastScriptTimestamp = window.speakingState.timestamp;
+                        updateSpeechState(window.speakingState.speaking, window.speakingState.text);
+                    }
+                };
+                document.head.appendChild(script);
             }
         }
 

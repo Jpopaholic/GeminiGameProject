@@ -183,14 +183,37 @@ class GeminiStreamEngine:
             json.dump(self.config, f, indent=2, ensure_ascii=False)
 
     def set_speaking_state(self, speaking, text=""):
-        """寫入助理當前的發言狀態，供 OBS 網頁 Logo Overlay 即時讀取亮起"""
+        """寫入助理當前的發言狀態，供 OBS 網頁 Logo Overlay 即時讀取亮起
+        同時輸出 speaking_state.js 供本機 file:// 開啟 index.html 時繞過 CORS 跨域限制
+        """
         try:
             # 確保父目錄存在
             os.makedirs(os.path.dirname(self.speaking_state_file), exist_ok=True)
+            state_data = {"speaking": speaking, "text": text, "timestamp": time.time()}
+            # 寫入 JSON（供 HTTP 伺服器環境的 fetch 輪詢使用）
             with open(self.speaking_state_file, "w", encoding="utf-8") as f:
-                json.dump({"speaking": speaking, "text": text, "timestamp": time.time()}, f, ensure_ascii=False)
+                json.dump(state_data, f, ensure_ascii=False)
+            # 同時輸出 JS 腳本（供本機 file:// 協議環境繞過 CORS 使用）
+            js_path = os.path.join(os.path.dirname(self.speaking_state_file), "speaking_state.js")
+            js_content = f"window.speakingState = {json.dumps(state_data, ensure_ascii=False)};"
+            with open(js_path, "w", encoding="utf-8") as f:
+                f.write(js_content)
         except Exception:
             pass
+
+    def get_wav_duration(self, audio_bytes):
+        """計算 WAV 音訊位元組的播放秒數，用於等待原生語音播畢"""
+        try:
+            import wave, io
+            with wave.open(io.BytesIO(audio_bytes)) as wf:
+                frames = wf.getnframes()
+                rate = wf.getframerate()
+                if rate > 0:
+                    return frames / float(rate)
+        except Exception:
+            pass
+        # 無法解析時，估算為文字長度 × 0.15 秒（粗略語速）
+        return 0
 
     def reload_profiles(self):
         """核心載入模組：載入大腦靈魂、主人設定、歷史回憶與項目插件配置"""
@@ -560,12 +583,30 @@ class GeminiStreamEngine:
             # 💡 修正點：自 config.json 動態載入模型代號，方便隨時切換（如 2.5 Flash 額滿改用 3.5 Flash）
             target_model = self.gemini_model
             
+            # 取得指定語音角色 (config.json 的 gemini_voice 欄位，預設 Aoede)
+            voice_name = self.config.get("gemini_voice", "Aoede")
+            
             # API 呼叫配置：同時要求文字與原生語音輸出 (AUDIO 模態會回傳 WAV 訊號)
-            config = types.GenerateContentConfig(
-                system_instruction=sys_inst,
-                response_modalities=["TEXT"], # 👈 解鎖端到端語音大腦
-                temperature=0.7
-            )
+            # 💡 解鎖端到端原生語音大腦：啟用 AUDIO + TEXT 雙模態，並設定指定語音角色
+            try:
+                speech_cfg = types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice_name)
+                    )
+                )
+                config = types.GenerateContentConfig(
+                    system_instruction=sys_inst,
+                    response_modalities=["AUDIO", "TEXT"],
+                    speech_config=speech_cfg,
+                    temperature=0.7
+                )
+            except Exception:
+                # 若 SDK 版本不支援 SpeechConfig，退回純文字模式
+                config = types.GenerateContentConfig(
+                    system_instruction=sys_inst,
+                    response_modalities=["TEXT"],
+                    temperature=0.7
+                )
             
             # 非同步在執行緒池中跑 API 請求，防堵主 asyncio 迴圈卡頓
             loop = asyncio.get_event_loop()
@@ -647,9 +688,11 @@ class GeminiStreamEngine:
             print(f"\n{RED}[AUDIO PLAYBACK ERROR] 語音播放失敗: {e}{RESET}")
 
     def speak_tts(self, text):
-        """非阻塞式播放本地 TTS 語音（Windows 支援 SAPI 與 PowerShell，macOS 支援 say）"""
+        """非阻塞式播放本地 TTS 語音（Windows 支援 SAPI 與 PowerShell，macOS 支援 say）
+        回傳執行緒/進程控制代碼，供外部等待語音播畢後再重置發言狀態
+        """
         if not text:
-            return
+            return None
             
         # 移除表情符號與顏文字以確保語音播放流暢
         clean_text = (
@@ -661,10 +704,9 @@ class GeminiStreamEngine:
         
         try:
             if sys.platform.startswith('win'):
-                # 優先使用 SAPI COM (最快、無額外進程啟動開銷)
+                # 優先使用 SAPI COM（阻塞式執行在背景執行緒，可等待）
                 try:
                     import win32com.client
-                    import threading
                     def _win_speak():
                         try:
                             import pythoncom
@@ -673,8 +715,9 @@ class GeminiStreamEngine:
                             speaker.Speak(clean_text)
                         except Exception:
                             pass
-                    threading.Thread(target=_win_speak, daemon=True).start()
-                    return
+                    t = threading.Thread(target=_win_speak, daemon=True)
+                    t.start()
+                    return t  # 回傳執行緒，供外部 join() 等待
                 except Exception:
                     pass
                 
@@ -682,21 +725,24 @@ class GeminiStreamEngine:
                 try:
                     ps_text = clean_text.replace('"', '""').replace("'", "''")
                     ps_command = f'Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak("{ps_text}")'
-                    subprocess.Popen(
+                    proc = subprocess.Popen(
                         ["powershell", "-Command", ps_command],
                         stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL
                     )
+                    return proc  # 回傳進程，供外部 wait() 等待
                 except Exception:
                     pass
             elif sys.platform.startswith('darwin'):
-                subprocess.Popen(
+                proc = subprocess.Popen(
                     ["say", "-v", "Mei-Jia", clean_text],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL
                 )
+                return proc  # 回傳進程，供外部 wait() 等待
         except Exception as e:
             print(f"\n{RED}[TTS PLAYBACK ERROR] TTS 語音播放失敗: {e}{RESET}")
+        return None
 
     def start_dual_ears_listener(self, query_callback):
         """啟動雙通道實體聽覺系統 (麥克風人聲 + 遊戲音訊環路)"""
@@ -933,19 +979,45 @@ class GeminiStreamEngine:
 
         # 7. 播放語音 (優先使用 Native Audio，無則使用本地 TTS)
         self.set_speaking_state(True, ai_response)
+        
+        tts_handle = None  # 用於後續等待 TTS 語音播畢
+        audio_duration = 0.0  # 原生語音播放秒數
+        
         if audio_bytes:
+            # 計算原生語音時長，供稍後等待同步
+            audio_duration = self.get_wav_duration(audio_bytes)
             self.play_native_audio(audio_bytes)
         else:
-            self.speak_tts(ai_response)
+            # 啟動 TTS 並保存控制代碼
+            tts_handle = self.speak_tts(ai_response)
 
-        # 8. 同步流式輸出文字回應
+        # 8. 同步流式輸出文字回應（與語音同時進行）
         print(f"\n{MAGENTA}{BOLD}Gemini：{RESET}")
         for char in ai_response:
             sys.stdout.write(char)
             sys.stdout.flush()
-            # 稍微調慢一點點，配合 Native Audio 的語音節奏感
+            # 配合 Native Audio 的語音節奏感稍微調慢
             await asyncio.sleep(0.02)
         print("\n")
+        
+        # 9. 等待語音播放完畢後，才重置發言狀態（確保 OBS Logo 動畫持續到聲音結束）
+        if audio_bytes and audio_duration > 0:
+            # 計算還需等待的剩餘時間 (打字已消耗部分時間)
+            text_output_time = len(ai_response) * 0.02
+            remaining = audio_duration - text_output_time
+            if remaining > 0:
+                print(f"{CYAN}[🎵 AUDIO SYNC]{RESET} 等待原生語音播畢 (剩餘約 {remaining:.1f} 秒)...")
+                await asyncio.sleep(remaining + 0.3)  # +0.3s 緩衝，防止截斷
+        elif tts_handle is not None:
+            # 等待本地 TTS 執行緒/進程結束
+            loop = asyncio.get_event_loop()
+            try:
+                if hasattr(tts_handle, 'join'):  # threading.Thread
+                    await loop.run_in_executor(None, tts_handle.join)
+                elif hasattr(tts_handle, 'wait'):  # subprocess.Popen
+                    await loop.run_in_executor(None, tts_handle.wait)
+            except Exception:
+                pass
         
         self.set_speaking_state(False)
         

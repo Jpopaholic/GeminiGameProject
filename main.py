@@ -23,13 +23,13 @@ async def main():
     engine.print_splash()
     # 呼叫 Gemini 動態生成開場歡迎詞
     welcome_prompt = (
-        "請為實況主「風子」生成一個親切、活潑且帶有你傲嬌又溫馨性格的開台歡迎問候詞！\n"
+        f"請為實況主「{engine.streamer_name}」生成一個親切、活潑且帶有你傲嬌又溫馨性格的開台歡迎問候詞！\n"
         "你可以提到要一起優化寫代碼或是玩遊戲，字數大約 80-150 字，直接輸出對話即可，絕對不要有任何前置或後置的解釋文字。"
     )
     print(f"{MAGENTA}{BOLD}Gemini 正在載入賽博魂魄，思考開場白中...{RESET}\n")
     
     welcome_msg = (
-        "大家安安！哈囉，你上線啦，風子！(〃∀〃) 今天我們也是開開心心一起努力喔！"
+        f"大家安安！哈囉，你上線啦，{engine.streamer_name}！(〃∀〃) 今天我們也是開開心心一起努力喔！"
     )
     audio_bytes = None
     
@@ -42,17 +42,33 @@ async def main():
             )
         except Exception as e:
             # 超時或出錯自動啟動備用防線
-            welcome_msg = "大家安安！哈囉，你上線啦，風子！今天我們也要開開心心一起寫扣和實況互動喔！"
+            welcome_msg = f"大家安安！哈囉，你上線啦，{engine.streamer_name}！今天我們也要開開心心一起寫扣和實況互動喔！"
             audio_bytes = None
             
     print(f"{MAGENTA}{BOLD}Gemini：{RESET}")
     print(welcome_msg + "\n")
     
     # 播放開場親切語音 (優先使用 Native Audio，若無則自動使用本地 TTS)
+    # 同步麮起 OBS Overlay Logo 動畫
+    engine.set_speaking_state(True, welcome_msg)
     if audio_bytes:
+        duration = engine.get_wav_duration(audio_bytes)
         engine.play_native_audio(audio_bytes)
+        # 等待語音播畢
+        if duration > 0:
+            await asyncio.sleep(duration + 0.3)
     else:
-        engine.speak_tts(welcome_msg)
+        tts_handle = engine.speak_tts(welcome_msg)
+        if tts_handle is not None:
+            loop = asyncio.get_event_loop()
+            try:
+                if hasattr(tts_handle, 'join'):
+                    await loop.run_in_executor(None, tts_handle.join)
+                elif hasattr(tts_handle, 'wait'):
+                    await loop.run_in_executor(None, tts_handle.wait)
+            except Exception:
+                pass
+    engine.set_speaking_state(False)
 
     # 建立非同步使用者輸入佇列
     user_input_queue = asyncio.Queue()
@@ -75,7 +91,7 @@ async def keyboard_input_loop(engine, user_input_queue):
         try:
             # 非同步讀取鍵盤終端機輸入 (保留鍵盤操作，作為雙模輸入)
             loop = asyncio.get_event_loop()
-            user_input = await loop.run_in_executor(None, lambda: input(f"{BOLD}風子 (或觀眾) >>> {RESET}"))
+            user_input = await loop.run_in_executor(None, lambda: input(f"{BOLD}{engine.streamer_name} (或觀眾) >>> {RESET}"))
             
             user_input = user_input.strip()
             if not user_input:
