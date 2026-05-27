@@ -125,6 +125,7 @@ class GeminiStreamEngine:
         self.chicken_steak_count = 0  # 本日新增雞排欠債
         self.roast_count = 0          # 本日吐槽次數
         self.vibe_score = 90          # 動態氣氛分數
+        self.api_exhausted = False    # 標記 API 額度是否耗盡
         
         # 載入設定與插件
         self.reload_profiles()
@@ -217,6 +218,7 @@ class GeminiStreamEngine:
 
     def reload_profiles(self):
         """核心載入模組：載入大腦靈魂、主人設定、歷史回憶與項目插件配置"""
+        self.api_exhausted = False  # 重新載入時重置 API 額度狀態
         # 1. 讀取主人背景
         self.host_info = self._read_file("player_profile", "host_info.txt")
         
@@ -232,22 +234,14 @@ class GeminiStreamEngine:
         is_casual_mode = not self.active_project or self.active_project.lower() == "none"
         plugin_config_path = os.path.join(self.base_dir, "game_tools", self.active_project, "plugin_config.json")
         if not is_casual_mode and os.path.exists(plugin_config_path):
-            with open(plugin_config_path, "r", encoding="utf-8") as f:
-                self.plugin_config = json.load(f)
+            try:
+                with open(plugin_config_path, "r", encoding="utf-8") as f:
+                    self.plugin_config = json.load(f)
+            except Exception as e:
+                print(f"{YELLOW}[WARN] 讀取 plugin_config.json 失敗: {e}，將降級使用通用配置。{RESET}")
+                self.plugin_config = {}
         else:
-            # 默認備份設定，以防插件缺少配置
-            display_name = "閒談模式" if is_casual_mode else self.active_project
-            self.plugin_config = {
-                "project_display_name": display_name,
-                "visual_roast": "你看你看！本助理放大看 480p 畫面，你的操作也太誇張了吧！",
-                "triggers": [],
-                "default_responses": ["哼，你就繼續聊吧，本助理隨時陪著你。┐(´д`)┌" if is_casual_mode else "哼，你就繼續玩吧，本助理在線嫌棄你。┐(´д`)┌"],
-                "memory_highlights": {
-                    "default": f"{self.streamer_name}今天順利完成了實況開台。" if is_casual_mode else "風子今天進行了實況。",
-                    "debt_increase": "風子今天因為失誤累計欠下 {debt} 塊雞排。",
-                    "forced_logout": "實況因 TPM 爆表觸發防禦強制下班。"
-                }
-            }
+            self.plugin_config = {}
 
         # 讀取專屬技能 txt
         if is_casual_mode:
@@ -262,15 +256,15 @@ class GeminiStreamEngine:
             else:
                 self.game_skills = {"info.txt": f"目前尚無 {self.active_project} 模組的技能檔案。"}
 
-        # 4. 撈取近期日記 (動態讀取最近 3 場)
+        # 4. 撈取近期日記 (動態讀取最近 3 場，改為 Markdown 格式)
         self.loaded_memories = []
-        memory_pattern = os.path.join(self.base_dir, "session_memories", "memory_*.json")
+        memory_pattern = os.path.join(self.base_dir, "session_memories", "memory_*.md")
         memory_files = glob.glob(memory_pattern)
         memory_files.sort(reverse=True)
         for mem_file in memory_files[:3]:
             try:
                 with open(mem_file, "r", encoding="utf-8") as f:
-                    self.loaded_memories.append(json.load(f))
+                    self.loaded_memories.append(f.read())
             except Exception as e:
                 pass
 
@@ -288,11 +282,11 @@ class GeminiStreamEngine:
         print(f"{CYAN}{BOLD}========================================================================={RESET}")
         print(f"{CYAN}{BOLD}     🤖  GEMINI GAME STREAM ENGINE (吉米尼萬用實況助理引擎)  v2.0  🤖{RESET}")
         print(f"{CYAN}{BOLD}========================================================================={RESET}")
-        print(f"{BOLD} 【實況主人背景】{RESET} {GREEN}已載入 ({self.streamer_name} / 賽博數獨大師){RESET}")
-        print(f"{BOLD} 【大腦靈魂設定】{RESET} {GREEN}已載入 (Gemini / 溫馨陪伴科技梗擔當){RESET}")
+        print(f"{BOLD} 【實況主人背景】{RESET} {GREEN}已載入 ({self.streamer_name}){RESET}")
+        print(f"{BOLD} 【大腦靈魂設定】{RESET} {GREEN}已載入 (Gemini / 實況助理核心){RESET}")
         print(f"{BOLD} 【雙向聽覺系統】{RESET} {GREEN if HAS_SPEECH else YELLOW}已配置 ({'雙通道背景音訊監聽' if HAS_SPEECH else '純鍵盤降級模式'}){RESET}")
-        print(f"{BOLD} 【當前插件外掛】{RESET} {YELLOW}{BOLD}{display_name}{RESET} {GREEN}已掛載 ({len(self.game_skills)} 個常識庫檔案){RESET}")
-        print(f"{BOLD} 【近期日記記憶】{RESET} {GREEN}已喚醒最近 {len(self.loaded_memories)} 場直播記憶快照{RESET}")
+        print(f"{BOLD} 【當前插件外掛】{RESET} {YELLOW}{BOLD}{display_name}{RESET} {GREEN}已載入 ({len(self.game_skills)} 個常識庫檔案){RESET}")
+        print(f"{BOLD} 【近期日記記憶】{RESET} {GREEN}已喚醒最近 {len(self.loaded_memories)} 場直播記憶日記{RESET}")
         
         # 顯示 API Key 加載與客戶端狀態
         if self.client:
@@ -307,8 +301,6 @@ class GeminiStreamEngine:
         else:
             print(f"{BOLD} 【實體實況眼睛】{RESET} {YELLOW}已停用 (將降級使用系統螢幕截圖 / test_gameplay.jpg){RESET}")
         
-        if self.loaded_memories:
-            print(f"   └─ 昨天的雞排累計欠債：{YELLOW}{BOLD}142 塊{RESET}")
         print(f"{CYAN}========================================================================={RESET}")
         print(f"{YELLOW}💡 雙通道聽覺監聽模式準備就緒...{RESET}")
         is_casual_mode = not self.active_project or self.active_project.lower() == "none"
@@ -316,18 +308,27 @@ class GeminiStreamEngine:
             print(f"👉 當前處於閒談模式，不進行畫面截圖。輸入或對話中提到「{CYAN}Gemini{RESET}」即可與助理進行一般日常對話！")
         else:
             print(f"👉 說話或輸入「{CYAN}gemini你看{RESET}」即可觸發 OBS / 桌面的 480p 畫面多模態視覺解讀！")
-        print(f"👉 說話提到「{CYAN}雞排{RESET}」或「{CYAN}誇張{RESET}」可觸發相關的計數與氛圍聯動效果！")
+        
+        # 動態顯示關鍵字提示，如果 plugin_config 內有配置 triggers
+        triggers = self.plugin_config.get("triggers", [])
+        if triggers:
+            kws = []
+            for t in triggers:
+                kws.extend(t.get("keywords", []))
+            if kws:
+                print(f"👉 本地觸發關鍵字: {', '.join(f'「{CYAN}{kw}{RESET}」' for kw in kws[:5])}")
+                
         print(f"👉 特殊指令: {BOLD}switch <project_name>{RESET} (熱切換遊戲), {BOLD}status{RESET} (監測 TPM), {BOLD}exit{RESET} (提煉日記並收播)")
         print(f"{CYAN}========================================================================={RESET}\n")
+
 
     def display_status(self):
         """顯示目前的詳細核心數值"""
         print(f"\n{MAGENTA}{BOLD}[ENGINE STATUS]{RESET}")
         print(f" ├─ 當前掛載項目: {YELLOW}{BOLD}{self.active_project}{RESET}")
         print(f" ├─ 近一分鐘 TPM: {GREEN if self.tpm_tracker.current_tpm < 850000 else RED}{self.tpm_tracker.current_tpm:,} / {self.tpm_tracker.limit:,}{RESET}")
-        print(f" ├─ 今日累計吐槽: {CYAN}{self.roast_count} 次{RESET}")
-        print(f" ├─ 今日雞排增幅: {YELLOW}{self.chicken_steak_count} 塊{RESET} (累計未結清: {142 + self.chicken_steak_count} 塊)")
-        print(f" └─ 本日實況氛圍: {GREEN}{self.vibe_score}% Vibe{RESET}\n")
+        print(f" ├─ 今日互動次數: {CYAN}{self.roast_count} 次{RESET}")
+        print(f" └─ 當前實況氛圍: {GREEN}{self.vibe_score}% Vibe{RESET}\n")
 
     async def run_visual_capture(self):
         """擷取當前直播畫面：優先對接 OBS WebSocket v5，再降級至 mss 截圖，最後降級至 test_gameplay.jpg"""
@@ -488,19 +489,16 @@ class GeminiStreamEngine:
         if default_resps:
             return random.choice(default_resps)
             
-        return f"哼，風子，你剛才說的那句話很有 Vibe，但本助理不知道該怎麼接，繼續加油喔！(́◉◞౪◟◉‵)"
+        return f"哼，{self.streamer_name}，你剛才說的那句話很有 Vibe，但本助理不知道該怎麼接，繼續加油喔！(́◉◞౪◟◉‵)"
 
     def get_assembled_system_instruction(self):
         """組合完整的系統設定，包含個性角色、背景、常駐技能、專屬技能與今日動態狀態"""
         game_skills_str = "\n".join(f"【專屬常識 - {k}】：\n{v}" for k, v in self.game_skills.items())
         
-        # 取得近期直播記憶摘要
+        # 取得近期直播記憶摘要 (Markdown 格式直接拼接)
         memories_summary = ""
         if self.loaded_memories:
-            memories_summary = "\n【近期直播回憶】：\n" + "\n".join(
-                f"- 日期: {m.get('session_date')}, 專案: {m.get('active_project')}, 亮點: {', '.join(m.get('highlights', []))}"
-                for m in self.loaded_memories
-            )
+            memories_summary = "\n【近期直播回憶】：\n" + "\n---\n".join(self.loaded_memories)
             
         is_casual_mode = not self.active_project or self.active_project.lower() == "none"
         project_display = "none (閒談模式)" if is_casual_mode else self.active_project
@@ -514,43 +512,29 @@ class GeminiStreamEngine:
             f"{memories_summary}\n\n"
             f"【今日實況動態數據】：\n"
             f"- 當前實況專案/遊戲：{project_display}\n"
-            f"- 今日累計吐槽次數：{self.roast_count} 次\n"
-            f"- 今日雞排欠債數量：{self.chicken_steak_count} 塊 (基礎欠債 142 塊，總計 {142 + self.chicken_steak_count} 塊)\n"
-            f"- 今日實況氛圍數值：{self.vibe_score}%\n\n"
+            f"- 今日累計互動次數：{self.roast_count} 次\n"
+            f"- 當前實況氛圍數值：{self.vibe_score}%\n\n"
             f"重要指示：\n"
             f"1. 請嚴格遵守角色性格設定。你的回覆應該溫馨、幽默、充滿在地感，並不時進行賽博吐槽。\n"
-            f"2. 若風子（或觀眾）提到『雞排』或『你看』等關鍵字，請適當加入相關的效果回應。\n"
+            f"2. 若{self.streamer_name}（或觀眾）提到『你看』等關鍵字，請適當進行多模態的觀察回應。\n"
             f"3. 你的回答必須使用繁體中文（台灣口吻），並搭配適合的顏文字。\n"
             f"4. 因為你正在與實況主用語音 Native Audio 對答，請保持回答精簡、流暢且具備口語互動感，避免長篇大論！每一句回答約在 100 字內最佳。"
         )
         if is_casual_mode:
             assembled += (
-                f"\n5. 當前處於閒談模式（沒有特定專案或遊戲掛載），請以溫暖有趣的日常閒聊方式與風子對答，不要勉強去解讀並不存在的遊戲或代碼畫面！"
+                f"\n5. 當前處於閒談模式（沒有特定專案或遊戲掛載），請以溫暖有趣的日常閒聊方式與{self.streamer_name}對答，不要勉強去解讀並不存在的遊戲或代碼畫面！"
             )
         return assembled
 
     async def generate_gemini_real_response(self, user_input, is_visual=False, image_bytes=None, capture_method=None):
         """串接真實 Gemini 2.5/3.5 Flash Native Audio Modality，支援視覺與語音輸出"""
-        if not self.client:
-            # 當無 API 連線時，降級至本地模擬文字
+        if not self.client or self.api_exhausted:
+            # 當無 API 連線或額度耗盡時，降級至本地模擬文字
             return self.generate_gemini_response(user_input, is_visual=is_visual), None
             
         self.roast_count += 1
         
-        # 1. 偵測關鍵字觸發效果統計 (雞排欠債)
-        user_input_lower = user_input.lower()
-        triggers = self.plugin_config.get("triggers", [])
-        for trigger in triggers:
-            keywords = trigger.get("keywords", [])
-            if any(kw in user_input_lower for kw in keywords):
-                effects = trigger.get("effects", {})
-                delta_steak = effects.get("chicken_steak_delta", 0)
-                self.chicken_steak_count += delta_steak
-                delta_vibe = effects.get("vibe_score_delta", 0)
-                self.vibe_score = max(0, min(100, self.vibe_score + delta_vibe))
-                break
-                
-        # 2. 組合 System Instruction
+        # 1. 組合 System Instruction
         sys_inst = self.get_assembled_system_instruction()
         
         # 3. 準備 contents
@@ -634,7 +618,20 @@ class GeminiStreamEngine:
             return text_response, audio_bytes
             
         except Exception as e:
-            print(f"\n{RED}[GEMINI API ERROR] API 呼叫失敗: {e}。自動防護降級為本地模擬...{RESET}")
+            err_msg = str(e)
+            if "RESOURCE_EXHAUSTED" in err_msg or "429" in err_msg:
+                print(f"\n{BG_RED}{BOLD}[🚨 API RESOURCE EXHAUSTED 🚨] Gemini API 額度或速率限制已耗盡 (RESOURCE_EXHAUSTED)！{RESET}")
+                print(f"{YELLOW}💡 提示：您可以稍等一分鐘重試，或者修改 config.json 切換到別的模型（例如從 gemini-2.5-flash 切換到 gemini-3.5-flash）！{RESET}\n")
+                
+                # 播放額度爆表告警語音
+                warning_msg = "哎呀！吉米尼的大腦額度暫時用完啦，我需要稍微休息一分鐘，或是請您切換到其他模型喔！"
+                self.set_speaking_state(True, warning_msg)
+                self.speak_tts(warning_msg)
+                # 非同步等待以讓語音播放
+                await asyncio.sleep(4.0)
+                self.set_speaking_state(False)
+            else:
+                print(f"\n{RED}[GEMINI API ERROR] API 呼叫失敗: {e}。自動防護降級為本地模擬...{RESET}")
             return self.generate_gemini_response(user_input, is_visual=is_visual), None
 
     def play_native_audio(self, audio_bytes):
@@ -889,7 +886,7 @@ class GeminiStreamEngine:
         is_visual_trigger = is_gemini_called and not is_casual_mode
         
         # 一般關鍵字連動觸發條件 (免截圖)
-        is_keyword_trigger = is_gemini_called or "誇張" in user_input
+        is_keyword_trigger = is_gemini_called
         
         image_bytes = None
         capture_method = None
@@ -933,8 +930,8 @@ class GeminiStreamEngine:
             await asyncio.sleep(0.5)
             print(f"\n{MAGENTA}{BOLD}Gemini：{RESET}")
             warning_exit_msg = (
-                f"『哎呀風子！我們今天的實況互動真的太熱烈了，TPM 已經達到安全上限囉！(〃∀〃)』\n"
-                f"『為了好好守護系統頻寬與流量，本助理要先啟動安全保護下班囉！今天真的辛苦風子了，我們收播囉，大家大合照拜拜！』"
+                f"『哎呀{self.streamer_name}！我們今天的實況互動真的太熱烈了，TPM 已經達到安全上限囉！(〃∀〃)』\n"
+                f"『為了好好守護系統頻寬與流量，本助理要先啟動安全保護下班囉！今天真的辛苦{self.streamer_name}了，我們收播囉，大家大合照拜拜！』"
             )
             print(f"{YELLOW}{warning_exit_msg}{RESET}\n")
             
@@ -1012,52 +1009,81 @@ class GeminiStreamEngine:
         })
 
     async def distill_and_archive_memory(self, forced=False):
-        """收播日記提煉模組 (Archiving stage) - 產生全新日記 JSON (解耦動態模版)"""
+        """收播日記提煉模組 (Archiving stage) - 產生全新日記 Markdown"""
         print(f"{CYAN}{BOLD}========================================================================={RESET}")
         print(f"{CYAN}{BOLD}               💾  正在進行實況日記提煉與收播存檔...  💾{RESET}")
         print(f"{CYAN}{BOLD}========================================================================={RESET}")
         await asyncio.sleep(0.8) # 模擬大腦思考提煉
 
         current_date_str = datetime.now().strftime("%Y%m%d")
-        filename = f"memory_{current_date_str}.json"
+        filename = f"memory_{current_date_str}.md"
         target_path = os.path.join(self.base_dir, "session_memories", filename)
         
-        # 取得插件配置中的 highlights 模板
-        highlights_config = self.plugin_config.get("memory_highlights", {})
+        diary_content = ""
         
-        # 提煉日記內容
-        highlights = []
-        
-        # 1. 預設亮點
-        highlights.append(highlights_config.get("default", f"{self.streamer_name}今天順利完成了實況開台。"))
-        
-        # 2. 雞排欠債增加亮點
-        if self.chicken_steak_count > 0:
-            debt_tpl = highlights_config.get("debt_increase", "今日新增雞排欠債 {debt} 塊。")
-            highlights.append(debt_tpl.replace("{debt}", str(self.chicken_steak_count)))
+        if self.client:
+            try:
+                # 透過真實 Gemini 聯網大腦動態生成助理的實況日記
+                diary_prompt = (
+                    f"請幫今天的實況寫一篇簡短、活潑、充滿個人風格的助理實況日記！\n"
+                    f"以下是今天的實況數據：\n"
+                    f"- 日期：{datetime.now().strftime('%Y-%m-%d')}\n"
+                    f"- 實況項目：{self.active_project}\n"
+                    f"- 今日累計互動次數：{self.roast_count} 次\n"
+                    f"- 當前實況氛圍數值：{self.vibe_score}%\n"
+                    f"- 是否觸發 TPM 安全保護強制下班：{'是' if forced else '否'}\n"
+                    f"\n"
+                    f"請以繁體中文（台灣口吻）、帶著你那傲嬌又暖心的實況助理性格，寫出 100 到 200 字左右的日記。\n"
+                    f"請在日記開頭用 Markdown 格式列出日期、項目與數據，\n"
+                    f"接著寫下你今天與實況主的互動感想、吐槽精華以及溫馨鼓勵！\n"
+                    f"請直接輸出 Markdown 日記內容即可，絕對不要包含任何其他解釋性文字。"
+                )
+                
+                print(f"{YELLOW}[🧠 AI DISTILLATION] 正在呼叫 Gemini API 提煉今日實況回憶日記...{RESET}")
+                
+                config = types.GenerateContentConfig(
+                    system_instruction=self.identity,
+                    response_modalities=["TEXT"],
+                    temperature=0.7
+                )
+                
+                loop = asyncio.get_event_loop()
+                response = await loop.run_in_executor(
+                    None,
+                    lambda: self.client.models.generate_content(
+                        model=self.gemini_model,
+                        contents=diary_prompt,
+                        config=config
+                    )
+                )
+                
+                if response.text:
+                    diary_content = response.text.strip()
+                    
+            except Exception as e:
+                err_msg = str(e)
+                if "RESOURCE_EXHAUSTED" in err_msg or "429" in err_msg:
+                    print(f"{RED}[AI DISTILLATION ERROR] AI 提煉日記因 API 額度限制 (RESOURCE_EXHAUSTED) 失敗。將使用本地備用方案建檔。{RESET}")
+                else:
+                    print(f"{RED}[AI DISTILLATION ERROR] AI 提煉日記失敗: {e}。啟動備份方案...{RESET}")
+                
+        if not diary_content:
+            # 備份方案：以排版精美的 Markdown 格式生成
+            forced_status = " (觸發 TPM 安全保護強制下班)" if forced else ""
+            diary_content = (
+                f"# 實況日記 - {datetime.now().strftime('%Y-%m-%d')}\n\n"
+                f"**本日專案**：{self.active_project.upper()}\n"
+                f"**動態數值**：\n"
+                f"- 今日互動次數：{self.roast_count} 次\n"
+                f"- 當前實況氛圍：{self.vibe_score}% Vibe{forced_status}\n\n"
+                f"## 助理簡評\n"
+                f"今天與 {self.streamer_name} 順利完成了實況互動！整個過程默契十足、氣氛非常歡樂。期待下一次能碰撞出更多精彩的火花，加油！(〃∀〃)\n"
+            )
             
-        # 3. 強制下班亮點
-        if forced:
-            forced_tpl = highlights_config.get("forced_logout", "實況因 TPM 爆表觸發防禦強制下班。")
-            highlights.append(forced_tpl)
-            
-        diary = {
-            "session_date": datetime.now().strftime("%Y-%m-%d"),
-            "active_project": self.active_project,
-            "highlights": highlights,
-            "gemini_roast_count": self.roast_count,
-            "chat_sentiment": "熱烈 (TPM 防衛觸發)" if forced else "歡樂 (雞排計數器爆量)",
-            "host_vibe_score": self.vibe_score,
-            "learned_jokes": [
-                "Kotlin 空安全不是裝飾品，不寫 Null Check 就等著被吐槽",
-                "WvW 衝鋒前先檢查翻滾無敵幀冷卻時間"
-            ]
-        }
-        
         # 寫入 session_memories/
         os.makedirs(os.path.dirname(target_path), exist_ok=True)
         with open(target_path, "w", encoding="utf-8") as f:
-            json.dump(diary, f, indent=2, ensure_ascii=False)
+            f.write(diary_content)
             
         # 關閉雙通道聽覺，防堵 memory leak
         self.game_audio_active = False
@@ -1069,10 +1095,9 @@ class GeminiStreamEngine:
             
         print(f"{GREEN}[SUCCESS]{RESET} 成功為今日實況日記建檔！")
         print(f" ├─ 日記路徑: {UNDERLINE}session_memories/{filename}{RESET}")
-        print(f" ├─ 本日亮點: {diary['highlights'][0]}")
-        print(f" └─ Gemini 吐槽次數: {YELLOW}{self.roast_count} 次{RESET} | 氣氛指數: {GREEN}{self.vibe_score}% Vibe{RESET}")
+        print(f" └─ 當前實況氛圍: {GREEN}{self.vibe_score}% Vibe{RESET} | 互動次數: {YELLOW}{self.roast_count} 次{RESET}")
         print(f"{CYAN}========================================================================={RESET}")
-        print(f"{MAGENTA}{BOLD}吉米尼實況助理溫馨下班啦！辛苦風子了，下次實況我們再見囉！(〃∀〃){RESET}\n")
+        print(f"{MAGENTA}{BOLD}吉米尼實況助理溫馨下班啦！辛苦{self.streamer_name}了，下次實況我們再見囉！(〃∀〃){RESET}\n")
 
     async def switch_project(self, new_project):
         """動態熱切換遊戲/開發專案（自動掃描 game_tools/ 下的所有插件資料夾）"""
@@ -1082,24 +1107,18 @@ class GeminiStreamEngine:
             self.active_project = "none"
         else:
             # 動態掃描 game_tools/ 目錄，取得所有合法的插件資料夾名稱
-            # 合法條件：必須同時擁有 plugin_config.json 與 skills/ 子資料夾
+            # 合法條件：只需要有 skills/ 子資料夾即可
             game_tools_path = os.path.join(self.base_dir, "game_tools")
             available_plugins = []
             if os.path.exists(game_tools_path):
                 for d in os.listdir(game_tools_path):
                     plugin_dir = os.path.join(game_tools_path, d)
-                    has_config = os.path.isfile(os.path.join(plugin_dir, "plugin_config.json"))
                     has_skills = os.path.isdir(os.path.join(plugin_dir, "skills"))
-                    if os.path.isdir(plugin_dir) and has_config and has_skills:
+                    if os.path.isdir(plugin_dir) and has_skills:
                         available_plugins.append(d)
                     elif os.path.isdir(plugin_dir):
                         # 結構不完整的資料夾給予提示，方便除錯
-                        missing = []
-                        if not has_config:
-                            missing.append("plugin_config.json")
-                        if not has_skills:
-                            missing.append("skills/")
-                        print(f"{YELLOW}[PLUGIN WARN] 插件資料夾 '{d}' 結構不完整，缺少: {', '.join(missing)}，已略過。{RESET}")
+                        print(f"{YELLOW}[PLUGIN WARN] 插件資料夾 '{d}' 結構不完整，缺少: skills/ 子資料夾，已略過。{RESET}")
             
             if normalized_project in [p.lower() for p in available_plugins]:
                 # 以實際資料夾名稱為準（保留大小寫）

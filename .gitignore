@@ -5,8 +5,7 @@ __pycache__/
 
 # Session Memories (Archived live stream diaries)
 # 確保實況日記快照不污染 Git 儲存庫
-session_memories/*.json
-!session_memories/memory_20260525.json # 保留示範用的初始回憶
+session_memories/*.md
 
 
 # Streamer Private Profiles (本地實況主敏感設定，不提交至 GitHub)
