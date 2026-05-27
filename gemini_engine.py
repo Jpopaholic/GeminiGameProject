@@ -125,6 +125,7 @@ class GeminiStreamEngine:
         self.roast_count = 0          # 本日對話次數 (動態統計)
         self.vibe_score = 90          # 動態氣氛分數 (通用實況氣氛)
         self.api_exhausted = False    # 標記 API 額度是否耗盡
+        self.is_speaking = False      # 標記助理當前是否正在發言（用於防回音防重複觸發）
         
         # 載入設定與插件
         self.reload_profiles()
@@ -188,6 +189,7 @@ class GeminiStreamEngine:
         """寫入助理當前的發言狀態，供 OBS 網頁 Logo Overlay 即時讀取亮起
         同時輸出 speaking_state.js 供本機 file:// 開啟 index.html 時繞過 CORS 跨域限制
         """
+        self.is_speaking = speaking
         try:
             # 確保父目錄存在
             os.makedirs(os.path.dirname(self.speaking_state_file), exist_ok=True)
@@ -999,6 +1001,8 @@ class GeminiStreamEngine:
                 pass
         
         self.set_speaking_state(False)
+        if hasattr(self, 'pcm_buffer'):
+            self.pcm_buffer.clear()
         
         # 記錄到本場日誌
         self.session_logs.append({
@@ -1333,6 +1337,11 @@ class GeminiStreamEngine:
             try:
                 async for message in websocket:
                     if isinstance(message, bytes):
+                        # 如果助理正在說話，直接忽略接收到的聲音，防範喇叭回音干擾與重複觸發
+                        if getattr(self, 'is_speaking', False):
+                            self.pcm_buffer.clear()
+                            continue
+                            
                         self.pcm_buffer.extend(message)
                         self.last_audio_time = time.time()
                         
