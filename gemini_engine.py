@@ -882,136 +882,141 @@ class GeminiStreamEngine:
         if (getattr(self, 'is_speaking', False) or getattr(self, 'is_quota_warning', False)) and user_input_lower not in ["exit", "quit", "status"] and not user_input_lower.startswith("switch "):
             return
             
-        # 1. 偵測 VAD 關鍵字與 Gemini 呼喚
+        # ⚡ 一收到請求，立即進入鎖定發言與處理狀態（思考/API 傳輸中），確保在這期間任何新語音或按鍵輸入都直接被排除！
+        self.set_speaking_state(True, "思考中...")
         
-        # 檢查是否為背景遊戲音效偵測
-        is_audio_event = user_input.startswith("[系統音效提示：")
-        
-        # 語音中文辨識優化：將召喚詞擴充，支援中文的 "吉米尼" 與 "你" (例如風子說：「你看這個」即可直接觸發)
-        is_gemini_called = "gemini" in user_input_lower or "吉米尼" in user_input_lower or "你" in user_input_lower or is_audio_event
-        
-        is_casual_mode = not self.active_project or self.active_project.lower() == "none"
-        
-        # 視覺截圖動作 (is_visual_trigger)：只要召喚助理（提及「你」、「Gemini」、「吉米尼」），且非閒談模式，即自動進行螢幕擷圖
-        is_visual_trigger = is_gemini_called and not is_casual_mode
-        
-        # 一般關鍵字連動觸發條件 (免截圖)
-        is_keyword_trigger = is_gemini_called
-        
-        image_bytes = None
-        capture_method = None
-        
-        # 2. 如果觸發視覺 VAD，進行截圖
-        if is_visual_trigger:
-            image_bytes, capture_method = await self.run_visual_capture()
-        elif is_keyword_trigger and not is_audio_event:
-            print(f"\n{YELLOW}[VAD TRIGGER]{RESET} 語音辨識/關鍵字連動成功觸發！")
-            await asyncio.sleep(0.2)
-
-        # 3. 計算輸入 Token
-        input_tokens = self.estimate_text_tokens(user_input)
-        self.tpm_tracker.add_tokens(input_tokens)
-        
-        # 4. 取得真實 AI 回覆與語音音訊
-        if self.client:
-            ai_response, audio_bytes = await self.generate_gemini_real_response(
-                user_input, 
-                is_visual=is_visual_trigger, 
-                image_bytes=image_bytes,
-                capture_method=capture_method
-            )
-        else:
-            # 降級至本地模擬
-            ai_response = self.generate_gemini_response(user_input, is_visual=is_visual_trigger)
-            audio_bytes = None
-            if not self.api_key or self.api_key == "YOUR_GEMINI_API_KEY_HERE":
-                print(f"{YELLOW}⚠️ [API WARNING] 雲端大腦金鑰未加載，正在以『模擬模式』運行互動！{RESET}")
-        
-        # 5. 計算輸出 Token 並加載
-        output_tokens = self.estimate_text_tokens(ai_response, is_response=True)
-        self.tpm_tracker.add_tokens(output_tokens)
-        
-        # 6. TPM 限額防護檢查
-        tpm_status = self.tpm_tracker.check_limit()
-        
-        if tpm_status == "EXCEEDED":
-            # 觸發安全流量守護防線！
-            self.is_quota_warning = True
-            print(f"\n{BG_RED}{BOLD}[🚨 TPM LIMIT BURST 🚨] 偵測到 1M TPM 警戒線已安全超載！啟動自動流量守護防線！{RESET}")
-            await asyncio.sleep(0.5)
-            print(f"\n{MAGENTA}{BOLD}Gemini：{RESET}")
-            warning_exit_msg = (
-                f"『哎呀{self.streamer_name}！我們今天的實況互動真的太熱烈了，TPM 已經達到安全上限囉！(〃∀〃)』\n"
-                f"『為了好好守護系統頻寬與流量，本助理要先啟動安全保護下班囉！今天真的辛苦{self.streamer_name}了，我們收播囉，大家大合照拜拜！』"
-            )
-            print(f"{YELLOW}{warning_exit_msg}{RESET}\n")
+        try:
+            # 1. 偵測 VAD 關鍵字與 Gemini 呼喚
             
-            self.set_speaking_state(True, warning_exit_msg)
-            # 使用 Native Voice 播放告別詞 (如果有) 或呼叫本地 TTS
+            # 檢查是否為背景遊戲音效偵測
+            is_audio_event = user_input.startswith("[系統音效提示：")
+            
+            # 語音中文辨識優化：將召喚詞擴充，支援中文的 "吉米尼" 與 "你" (例如風子說：「你看這個」即可直接觸發)
+            is_gemini_called = "gemini" in user_input_lower or "吉米尼" in user_input_lower or "你" in user_input_lower or is_audio_event
+            
+            is_casual_mode = not self.active_project or self.active_project.lower() == "none"
+            
+            # 視覺截圖動作 (is_visual_trigger)：只要召喚助理（提及「你」、「Gemini」、「吉米尼」），且非閒談模式，即自動進行螢幕擷圖
+            is_visual_trigger = is_gemini_called and not is_casual_mode
+            
+            # 一般關鍵字連動觸發條件 (免截圖)
+            is_keyword_trigger = is_gemini_called
+            
+            image_bytes = None
+            capture_method = None
+            
+            # 2. 如果觸發視覺 VAD，進行截圖
+            if is_visual_trigger:
+                image_bytes, capture_method = await self.run_visual_capture()
+            elif is_keyword_trigger and not is_audio_event:
+                print(f"\n{YELLOW}[VAD TRIGGER]{RESET} 語音辨識/關鍵字連動成功觸發！")
+                await asyncio.sleep(0.2)
+
+            # 3. 計算輸入 Token
+            input_tokens = self.estimate_text_tokens(user_input)
+            self.tpm_tracker.add_tokens(input_tokens)
+            
+            # 4. 取得真實 AI 回覆與語音音訊
             if self.client:
-                # 簡單生成一段 Native Audio 告別
-                _, exit_audio = await self.generate_gemini_real_response("助理要強制下班了，跟大家道別", is_visual=False)
-                if exit_audio:
-                    self.play_native_audio(exit_audio)
+                ai_response, audio_bytes = await self.generate_gemini_real_response(
+                    user_input, 
+                    is_visual=is_visual_trigger, 
+                    image_bytes=image_bytes,
+                    capture_method=capture_method
+                )
+            else:
+                # 降級至本地模擬
+                ai_response = self.generate_gemini_response(user_input, is_visual=is_visual_trigger)
+                audio_bytes = None
+                if not self.api_key or self.api_key == "YOUR_GEMINI_API_KEY_HERE":
+                    print(f"{YELLOW}⚠️ [API WARNING] 雲端大腦金鑰未加載，正在以『模擬模式』運行互動！{RESET}")
+            
+            # 5. 計算輸出 Token 並加載
+            output_tokens = self.estimate_text_tokens(ai_response, is_response=True)
+            self.tpm_tracker.add_tokens(output_tokens)
+            
+            # 6. TPM 限額防護檢查
+            tpm_status = self.tpm_tracker.check_limit()
+            
+            if tpm_status == "EXCEEDED":
+                # 觸發安全流量守護防線！
+                self.is_quota_warning = True
+                print(f"\n{BG_RED}{BOLD}[🚨 TPM LIMIT BURST 🚨] 偵測到 1M TPM 警戒線已安全超載！啟動自動流量守護防線！{RESET}")
+                await asyncio.sleep(0.5)
+                print(f"\n{MAGENTA}{BOLD}Gemini：{RESET}")
+                warning_exit_msg = (
+                    f"『哎呀{self.streamer_name}！我們今天的實況互動真的太熱烈了，TPM 已經達到安全上限囉！(〃∀〃)』\n"
+                    f"『為了好好守護系統頻寬與流量，本助理要先啟動安全保護下班囉！今天真的辛苦{self.streamer_name}了，我們收播囉，大家大合照拜拜！』"
+                )
+                print(f"{YELLOW}{warning_exit_msg}{RESET}\n")
+                
+                self.set_speaking_state(True, warning_exit_msg)
+                # 使用 Native Voice 播放告別詞 (如果有) 或呼叫本地 TTS
+                if self.client:
+                    # 簡單生成一段 Native Audio 告別
+                    _, exit_audio = await self.generate_gemini_real_response("助理要強制下班了，跟大家道別", is_visual=False)
+                    if exit_audio:
+                        self.play_native_audio(exit_audio)
+                    else:
+                        self.speak_tts(warning_exit_msg)
                 else:
                     self.speak_tts(warning_exit_msg)
+                await asyncio.sleep(4.0)
+                
+                self.set_speaking_state(False)
+                await asyncio.sleep(1.0)
+                await self.distill_and_archive_memory(forced=True)
+                sys.exit(0)
+                
+            elif tpm_status == "WARNING":
+                print(f"\n{BG_BLACK_FG_YELLOW}[⚠️ TPM WARNING] 當前 TPM 達 {self.tpm_tracker.current_tpm:,}，已逼近 850,000 限額！防護罩隨時可能開啟！{RESET}")
+
+            # 7. 播放語音 (優先使用 Native Audio，無則使用本地 TTS)
+            self.set_speaking_state(True, ai_response)
+            
+            tts_handle = None  # 用於後續等待 TTS 語音播畢
+            audio_duration = 0.0  # 原生語音播放秒數
+            
+            if audio_bytes:
+                # 計算原生語音時長，供稍後等待同步
+                audio_duration = self.get_wav_duration(audio_bytes)
+                self.play_native_audio(audio_bytes)
             else:
-                self.speak_tts(warning_exit_msg)
-            await asyncio.sleep(4.0)
+                # 啟動 TTS 並保存控制代碼
+                tts_handle = self.speak_tts(ai_response)
+
+            # 8. 同步流式輸出文字回應（與語音同時進行）
+            print(f"\n{MAGENTA}{BOLD}Gemini：{RESET}")
+            for char in ai_response:
+                sys.stdout.write(char)
+                sys.stdout.flush()
+                # 配合 Native Audio 的語音節奏感稍微調慢
+                await asyncio.sleep(0.02)
+            print("\n")
             
+            # 9. 等待語音播放完畢後，才重置發言狀態（確保 OBS Logo 動畫持續到聲音結束）
+            if audio_bytes and audio_duration > 0:
+                # 計算還需等待的剩餘時間 (打字已消耗部分時間)
+                text_output_time = len(ai_response) * 0.02
+                remaining = audio_duration - text_output_time
+                if remaining > 0:
+                    print(f"{CYAN}[🎵 AUDIO SYNC]{RESET} 等待原生語音播畢 (剩餘約 {remaining:.1f} 秒)...")
+                    await asyncio.sleep(remaining + 0.3)  # +0.3s 緩衝，防止截斷
+            elif tts_handle is not None:
+                # 等待本地 TTS 執行緒/進程結束
+                loop = asyncio.get_event_loop()
+                try:
+                    if hasattr(tts_handle, 'join'):  # threading.Thread
+                        await loop.run_in_executor(None, tts_handle.join)
+                    elif hasattr(tts_handle, 'wait'):  # subprocess.Popen
+                        await loop.run_in_executor(None, tts_handle.wait)
+                except Exception:
+                    pass
+        finally:
+            # 確保不論執行成功或遭遇任何 API 超載異常，皆徹底解鎖並清空聽訊緩衝區！
             self.set_speaking_state(False)
-            await asyncio.sleep(1.0)
-            await self.distill_and_archive_memory(forced=True)
-            sys.exit(0)
-            
-        elif tpm_status == "WARNING":
-            print(f"\n{BG_BLACK_FG_YELLOW}[⚠️ TPM WARNING] 當前 TPM 達 {self.tpm_tracker.current_tpm:,}，已逼近 850,000 限額！防護罩隨時可能開啟！{RESET}")
-
-        # 7. 播放語音 (優先使用 Native Audio，無則使用本地 TTS)
-        self.set_speaking_state(True, ai_response)
-        
-        tts_handle = None  # 用於後續等待 TTS 語音播畢
-        audio_duration = 0.0  # 原生語音播放秒數
-        
-        if audio_bytes:
-            # 計算原生語音時長，供稍後等待同步
-            audio_duration = self.get_wav_duration(audio_bytes)
-            self.play_native_audio(audio_bytes)
-        else:
-            # 啟動 TTS 並保存控制代碼
-            tts_handle = self.speak_tts(ai_response)
-
-        # 8. 同步流式輸出文字回應（與語音同時進行）
-        print(f"\n{MAGENTA}{BOLD}Gemini：{RESET}")
-        for char in ai_response:
-            sys.stdout.write(char)
-            sys.stdout.flush()
-            # 配合 Native Audio 的語音節奏感稍微調慢
-            await asyncio.sleep(0.02)
-        print("\n")
-        
-        # 9. 等待語音播放完畢後，才重置發言狀態（確保 OBS Logo 動畫持續到聲音結束）
-        if audio_bytes and audio_duration > 0:
-            # 計算還需等待的剩餘時間 (打字已消耗部分時間)
-            text_output_time = len(ai_response) * 0.02
-            remaining = audio_duration - text_output_time
-            if remaining > 0:
-                print(f"{CYAN}[🎵 AUDIO SYNC]{RESET} 等待原生語音播畢 (剩餘約 {remaining:.1f} 秒)...")
-                await asyncio.sleep(remaining + 0.3)  # +0.3s 緩衝，防止截斷
-        elif tts_handle is not None:
-            # 等待本地 TTS 執行緒/進程結束
-            loop = asyncio.get_event_loop()
-            try:
-                if hasattr(tts_handle, 'join'):  # threading.Thread
-                    await loop.run_in_executor(None, tts_handle.join)
-                elif hasattr(tts_handle, 'wait'):  # subprocess.Popen
-                    await loop.run_in_executor(None, tts_handle.wait)
-            except Exception:
-                pass
-        
-        self.set_speaking_state(False)
-        if hasattr(self, 'pcm_buffer'):
-            self.pcm_buffer.clear()
+            if hasattr(self, 'pcm_buffer'):
+                self.pcm_buffer.clear()
         
         # 記錄到本場日誌
         self.session_logs.append({
