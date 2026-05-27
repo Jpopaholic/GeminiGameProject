@@ -121,9 +121,150 @@ python3 main.py
 將本專案的炫酷發光 Logo 與對話框融入您的實況畫面：
 1. 在 OBS 的「來源」視窗點擊 **`+`**，選擇 **`瀏覽器` (Browser)**。
 2. 命名為 `Gemini_Logo`，勾選 **`本地檔案` (Local File)**。
-3. 點選瀏覽，選擇專案資料夾中的 [stream_overlay/index.html](file:///Users/jpopaholic/Documents/GeminiGameProject/stream_overlay/index.html)。
+3. 點選瀏覽，選擇專案資料夾中的 [stream_overlay/index.html](stream_overlay/index.html)。
 4. 設定寬度為 **`500`**，高度為 **`500`**，點擊確定。
 5. （選擇性）若需要以實體麥克風/音響聲量感應（而非引擎輪詢），可點擊 OBS 來源視窗的「互動」按鈕，並點擊最上方的「模式切換」或雙擊 Logo 進行效果測試。
+
+---
+
+## 🔧 深度客製化指南 (Customization Guide)
+
+### 🧠 調整 AI 的靈魂人格 (`brain_profile/`)
+
+AI 的大腦由以下三個文字檔構成，全部都是純文字格式，直接編輯即可：
+
+#### `brain_profile/identity.txt` — 靈魂核心
+定義 AI 助理的根本人格、說話風格與個性特徵。是她有沒有個性、會不會吐槽、傲不傲嬌的根源設定。
+
+```
+（範例片段）
+你的代號：Gemini（吉米尼）
+定位：實況 AI 陪伴助理 / 賽博吐槽擔當
+個性：溫馨陪伴科技梗擔當，表面傲嬌內心關心，喜歡在實況主失誤時痛快補刀，但每次都附上加油鼓勵。
+```
+
+#### `brain_profile/base_skills/general.txt` — 常駐通用技能
+定義 AI 的基礎能力，如「何時應該主動開口說話」、「如何解讀截圖畫面」、「如何防止冷場」等。這裡的設定適用於所有遊戲與情境。
+
+```
+（範例片段）
+2. 防發呆/防尬聊機制 (Anti-Silence Pulse)：
+   - 當監測到實況主超過 10 秒沒有發言時，隨機拋出話題打破冷場...
+```
+
+#### `brain_profile/base_skills/language.txt` — 台灣在地語意庫
+定義 AI 使用的語言風格與社群梗。想讓她認識更多台灣實況圈的用語，直接往這裡補充：
+
+```
+（範例片段）
+- 「有料 / 無料」：評估操作是否厲害。
+- 「下去」：當實況主操作失誤時，叫他趕快下去領便當。
+- 「GG」：通用遊戲結束語，表示這局結束了。
+```
+
+> [!TIP]
+> `base_skills/` 資料夾支援多個技能檔案，引擎會自動掃描並載入所有 `.txt` 檔案。想新增「遊戲禮儀技能庫」或「台股梗語意庫」？直接在此資料夾建立新的 `.txt` 檔案即可！
+
+---
+
+### 👤 設定實況主背景 (`player_profile/host_info.txt`)
+
+這個檔案讓 AI 認識「她的主人是誰」，理解實況主的性格與背景，才能做出精準的個人化吐槽。
+
+```
+【實況主背景】：
+名字是[您的名字]，是一位[職業/興趣描述]。
+平常性格[性格描述]。
+你作為實況助理，需要配合他的背景話題對答，適當時候吐槽他的[常見失誤]！
+```
+
+填寫越詳細，AI 的互動就越有個性、越貼近您的實況風格。
+
+---
+
+### 🎮 新增遊戲插件 (`game_tools/`)
+
+每個遊戲都是一個獨立的資料夾，包含兩個部分：
+
+```
+game_tools/
+└── your_game/              ← 資料夾名稱即為 switch 指令的參數
+    ├── plugin_config.json  ← 插件核心設定（必須）
+    └── skills/             ← 遊戲專屬知識庫（選填，可有多個 .txt）
+        ├── mechanics.txt
+        └── market.txt
+```
+
+#### `plugin_config.json` 結構說明
+
+```json
+{
+  "project_display_name": "您的遊戲名稱（顯示用）",
+  "visual_roast": "當助理看到遊戲畫面時，會說的那段吐槽台詞（支援 \\n 換行）",
+  "triggers": [
+    {
+      "keywords": ["關鍵字1", "關鍵字2"],
+      "response": "偵測到以上任一關鍵字時，AI 回覆的台詞。可用 {accumulated_debt} 插入累積欠債數。",
+      "effects": {
+        "chicken_steak_delta": 5,
+        "vibe_score_delta": -3
+      }
+    }
+  ],
+  "default_responses": [
+    "當輸入沒有匹配到任何關鍵字時，隨機從這個陣列選一條回覆。"
+  ],
+  "memory_highlights": {
+    "default": "收播時寫入日記的預設亮點記錄。",
+    "debt_increase": "當有雞排欠債時寫入日記（用 {debt} 插入欠債數量）。",
+    "forced_logout": "因 TPM 防護強制下班時的日記記錄。"
+  }
+}
+```
+
+**`effects` 欄位說明：**
+| 欄位 | 功能 |
+|------|------|
+| `chicken_steak_delta` | 觸發時增加/減少的雞排欠債數量（正數加債、負數還債） |
+| `vibe_score_delta` | 觸發時調整氣氛值（0~100），影響本日實況氣氛評分 |
+
+#### `skills/*.txt` 知識庫格式
+
+知識庫是純文字，引擎會把所有 `.txt` 檔案內容整個送進 System Prompt，讓 AI 在聊天時能靈活引用遊戲知識：
+
+```
+遊戲插件：[遊戲名稱]
+模組名稱：[知識模組名稱，如「市場交易」、「戰鬥機制」]
+
+【核心知識點】
+1. [知識標題]：
+   - [詳細說明]
+   - [Gemini 吐槽角度]：「[針對這個知識點的吐槽範例]」
+```
+
+#### 建立新遊戲的完整流程
+
+```bash
+# 1. 建立資料夾（資料夾名 = switch 指令參數）
+mkdir game_tools/minecraft
+
+# 2. 建立插件設定
+# 編輯 game_tools/minecraft/plugin_config.json
+
+# 3. （選填）建立技能資料夾與知識庫
+mkdir game_tools/minecraft/skills
+# 編輯 game_tools/minecraft/skills/survival.txt
+
+# 4. 在 config.json 切換到新遊戲
+# 修改 "active_project": "minecraft"
+# 或在執行期間使用 CLI 指令：
+```
+```
+switch minecraft
+```
+
+> [!NOTE]
+> 引擎目前硬編碼支援 `gw2`、`vibe_coding` 與 `none`（閒談模式）的切換指令驗證。若要新增其他遊戲，需同步修改 `gemini_engine.py` 中 `switch_project()` 函式的白名單列表。
 
 ---
 
