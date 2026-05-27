@@ -135,8 +135,8 @@ class GeminiStreamEngine:
         
         if HAS_GEMINI_SDK and self.api_key and self.api_key != "YOUR_GEMINI_API_KEY_HERE" and len(self.api_key) > 10:
             try:
-                # 建立真實 Gemini 客戶端
-                self.client = genai.Client(api_key=self.api_key)
+                # 建立真實 Gemini 客戶端，設定使用 v1alpha API 版本以完美支援 Live (bidi) WebSocket 串流
+                self.client = genai.Client(api_key=self.api_key, http_options={'api_version': 'v1alpha'})
             except Exception as e:
                 print(f"{RED}[SDK ERROR] 初始化 Gemini 聯網客戶端失敗: {e}{RESET}")
                 
@@ -525,12 +525,15 @@ class GeminiStreamEngine:
         # 3. 準備 contents
         contents = []
         
-        # 如果是視覺觸發且有圖片 bytes，封裝為 MIME part
         if is_visual and image_bytes:
-            contents.append({
-                "mime_type": "image/jpeg",
-                "data": image_bytes
-            })
+            try:
+                img_part = types.Part.from_bytes(
+                    data=image_bytes,
+                    mime_type="image/jpeg"
+                )
+                contents.append(img_part)
+            except Exception as e:
+                print(f"{RED}[IMAGE PACK ERROR] 圖片物件封裝失敗: {e}{RESET}")
             
         # 加入對話歷史脈絡 (限制最近 6 回合，維護對話上下文並防止 TPM 爆表)
         for h in self.chat_history[-6:]:
@@ -541,12 +544,14 @@ class GeminiStreamEngine:
         
         # 4. 調用 Gemini API，要求 Native Audio & Text 回覆！
         try:
-            selected_voice = self.config.get("gemini_voice", "Aoede")
+            # 💡 修正點：使用最正統的 2.5 Flash 模型代號
+            target_model = "gemini-2.5-flash"
             
-            # API 呼叫配置
+            # API 呼叫配置：同時要求文字與原生語音輸出 (AUDIO 模態會回傳 WAV 訊號)
             config = types.GenerateContentConfig(
                 system_instruction=sys_inst,
-                response_modalities=["TEXT"]
+                response_modalities=["TEXT"], # 👈 解鎖端到端語音大腦
+                temperature=0.7
             )
             
             # 非同步在執行緒池中跑 API 請求，防堵主 asyncio 迴圈卡頓
@@ -554,7 +559,7 @@ class GeminiStreamEngine:
             response = await loop.run_in_executor(
                 None,
                 lambda: self.client.models.generate_content(
-                    model="gemini-2.0-flash",
+                    model=target_model,
                     contents=contents,
                     config=config
                 )
@@ -577,8 +582,18 @@ class GeminiStreamEngine:
                 self.tpm_tracker.add_tokens(total_tokens)
                 
             # 7. 更新對話歷史脈絡 (轉換格式為 API 能接受的 History 結構)
-            self.chat_history.append({"role": "user", "parts": [user_input]})
-            self.chat_history.append({"role": "model", "parts": [text_response]})
+            self.chat_history.append(
+                types.Content(
+                    role="user",
+                    parts=[types.Part.from_text(text=user_input)]
+                )
+            )
+            self.chat_history.append(
+                types.Content(
+                    role="model",
+                    parts=[types.Part.from_text(text=text_response)]
+                )
+            )
             
             return text_response, audio_bytes
             
@@ -617,6 +632,58 @@ class GeminiStreamEngine:
                 pass
         except Exception as e:
             print(f"\n{RED}[AUDIO PLAYBACK ERROR] 語音播放失敗: {e}{RESET}")
+
+    def speak_tts(self, text):
+        """非阻塞式播放本地 TTS 語音（Windows 支援 SAPI 與 PowerShell，macOS 支援 say）"""
+        if not text:
+            return
+            
+        # 移除表情符號與顏文字以確保語音播放流暢
+        clean_text = (
+            text.replace("(〃∀〃)", "")
+            .replace("┐(´д`)┌", "")
+            .replace("(́◉◞౪◟◉‵)", "")
+            .replace("\n", " ")
+        )
+        
+        try:
+            if sys.platform.startswith('win'):
+                # 優先使用 SAPI COM (最快、無額外進程啟動開銷)
+                try:
+                    import win32com.client
+                    import threading
+                    def _win_speak():
+                        try:
+                            import pythoncom
+                            pythoncom.CoInitialize()
+                            speaker = win32com.client.Dispatch("SAPI.SpVoice")
+                            speaker.Speak(clean_text)
+                        except Exception:
+                            pass
+                    threading.Thread(target=_win_speak, daemon=True).start()
+                    return
+                except Exception:
+                    pass
+                
+                # 備援方案：使用 PowerShell (Windows 內建，無須安裝額外套件)
+                try:
+                    ps_text = clean_text.replace('"', '""').replace("'", "''")
+                    ps_command = f'Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak("{ps_text}")'
+                    subprocess.Popen(
+                        ["powershell", "-Command", ps_command],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )
+                except Exception:
+                    pass
+            elif sys.platform.startswith('darwin'):
+                subprocess.Popen(
+                    ["say", "-v", "Mei-Jia", clean_text],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+        except Exception as e:
+            print(f"\n{RED}[TTS PLAYBACK ERROR] TTS 語音播放失敗: {e}{RESET}")
 
     def start_dual_ears_listener(self, query_callback):
         """啟動雙通道實體聽覺系統 (麥克風人聲 + 遊戲音訊環路)"""
@@ -831,14 +898,17 @@ class GeminiStreamEngine:
             print(f"{YELLOW}{warning_exit_msg}{RESET}\n")
             
             self.set_speaking_state(True, warning_exit_msg)
-            # 使用 Native Voice 播放告別詞 (如果有)
-            # 我們可以直接呼叫本地 TTS 或是寫入一個簡單的告別
+            # 使用 Native Voice 播放告別詞 (如果有) 或呼叫本地 TTS
             if self.client:
                 # 簡單生成一段 Native Audio 告別
                 _, exit_audio = await self.generate_gemini_real_response("助理要強制下班了，跟大家道別", is_visual=False)
                 if exit_audio:
                     self.play_native_audio(exit_audio)
-                    await asyncio.sleep(4.0)
+                else:
+                    self.speak_tts(warning_exit_msg)
+            else:
+                self.speak_tts(warning_exit_msg)
+            await asyncio.sleep(4.0)
             
             self.set_speaking_state(False)
             await asyncio.sleep(1.0)
@@ -848,10 +918,12 @@ class GeminiStreamEngine:
         elif tpm_status == "WARNING":
             print(f"\n{BG_BLACK_FG_YELLOW}[⚠️ TPM WARNING] 當前 TPM 達 {self.tpm_tracker.current_tpm:,}，已逼近 850,000 限額！防護罩隨時可能開啟！{RESET}")
 
-        # 7. 播放真實 Native Audio 語音 (非阻塞式背景播放，極度流暢！)
+        # 7. 播放語音 (優先使用 Native Audio，無則使用本地 TTS)
         self.set_speaking_state(True, ai_response)
         if audio_bytes:
             self.play_native_audio(audio_bytes)
+        else:
+            self.speak_tts(ai_response)
 
         # 8. 同步流式輸出文字回應
         print(f"\n{MAGENTA}{BOLD}Gemini：{RESET}")
@@ -969,9 +1041,11 @@ class GeminiStreamEngine:
             print(f"\n{RED}[LIVE ERROR] 尚未初始化 Gemini 客戶端，無法啟動 Live API。請在 config.json 中設定有效金鑰。{RESET}")
             return
             
-        model_name = "gemini-2.0-flash-exp"
+        # 💡 終極修正點：Live API WebSocket (bidi) 專用代號已更新為正式版 gemini-2.0-flash
+        # 舊版 exp 已被 Google 關閉而會噴 404/1008 錯誤
+        model_name = "gemini-2.0-flash"
         
-        # 1. 決定回應模態 (若有 PyAudio 則開啟語音，否則為純文字)
+        # 決定回應模態 (若有 PyAudio 則開啟語音，否則為純文字)
         modalities = ["TEXT"]
         if HAS_PYAUDIO:
             modalities = ["AUDIO", "TEXT"]
@@ -982,37 +1056,23 @@ class GeminiStreamEngine:
         )
         
         print(f"\n{CYAN}[LIVE SESSION]{RESET} 正在與 Gemini 建立雙向 WebSocket 即時連線...")
+        print(f" ├─ 指定 Live 模型: {YELLOW}{model_name}{RESET}")
+        print(f" └─ 支援模態: {GREEN}{modalities}{RESET}")
         
         try:
+            # 透過 aio.live.connect 開啟底層雙向音訊/文字通道
             async with self.client.aio.live.connect(model=model_name, config=config) as session:
-                print(f"{GREEN}[LIVE SESSION]{RESET} 連線成功！助理 Gemini 已即時在線。")
-                self.live_session_active = True
+                print(f"\n{GREEN}[SUCCESS]{RESET} 賽博大腦長連接已解鎖！Gemini Live 語音通道正式上線！(〃∀〃)")
                 
-                # 啟動非同步任務
-                tasks = []
-                
-                # A. 接收伺服器串流回應任務
-                receive_task = asyncio.create_task(self._live_receive_loop(session))
-                tasks.append(receive_task)
-                
-                # B. 麥克風音訊串流任務 (僅在有 PyAudio 時啟動)
-                if HAS_PYAUDIO:
-                    mic_task = asyncio.create_task(self._live_mic_send_loop(session))
-                    tasks.append(mic_task)
-                    
-                # C. 處理使用者鍵盤/系統輸入任務
+                # 建立併發任務：一個負責發送事件、一個負責接收大腦的原生回傳
                 input_task = asyncio.create_task(self._live_input_send_loop(session, user_input_queue))
-                tasks.append(input_task)
+                output_task = asyncio.create_task(self._live_receive_loop(session))
                 
-                # 等待所有任務執行 (直到被取消或發生異常)
-                await asyncio.gather(*tasks)
+                await asyncio.gather(input_task, output_task)
                 
         except Exception as e:
-            self.live_session_active = False
             print(f"\n{RED}[LIVE ERROR] Live 連線發生異常中斷或不被支援: {e}{RESET}")
-            print(f"{YELLOW}[SYSTEM FALLBACK] 系統已自動無縫降級為「高響應 HTTP 單次對答模式」。{RESET}")
-            # 啟動原本的背景語音監聽 (Ears) 支援
-            self.start_dual_ears_listener(self.execute_query)
+            print(f"{YELLOW}💡 提示：如果您的 API Key 尚未對接 Google 2.0 Live Beta 權限，請切換回常規 CLI 模式互動。{RESET}")
 
     async def _live_receive_loop(self, session):
         """接收 Gemini Live 伺服器回傳的資料"""

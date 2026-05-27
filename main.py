@@ -21,28 +21,38 @@ async def main():
     # 載入核心解耦引擎
     engine = GeminiStreamEngine()
     engine.print_splash()
-    
-    # 模擬開場親切問候
-    welcome_msg = (
-        f"哈囉，你上線啦，風子！(〃∀〃) \n"
-        f"今天我們是要一起優化那個精細雕琢三年的 Android 數獨專案，\n"
-        f"還是要開《激戰 2》到世界戰場展現藍標指揮官的衝鋒風采呢？\n"
-        f"不論風子今天想玩哪一個，我都已經準備好全程陪伴你、為你加油打氣囉！助理 Gemini 全程在線，我們出發吧！"
+    # 呼叫 Gemini 動態生成開場歡迎詞
+    welcome_prompt = (
+        "請為實況主「風子」生成一個親切、活潑且帶有你傲嬌又溫馨性格的開台歡迎問候詞！\n"
+        "你可以提到要一起優化寫代碼或是玩遊戲，字數大約 80-150 字，直接輸出對話即可，絕對不要有任何前置或後置的解釋文字。"
     )
+    print(f"{MAGENTA}{BOLD}Gemini 正在載入賽博魂魄，思考開場白中...{RESET}\n")
+    
+    welcome_msg = (
+        "大家安安！哈囉，你上線啦，風子！(〃∀〃) 今天我們也是開開心心一起努力喔！"
+    )
+    audio_bytes = None
+    
+    if engine.client:
+        try:
+            # ⚡ 建立 3.5 秒防卡死超時防線：若 Gemini 思考超時或 API 連線卡住，自動秒級降級為溫馨預設歡迎詞
+            welcome_msg, audio_bytes = await asyncio.wait_for(
+                engine.generate_gemini_real_response(welcome_prompt, is_visual=False),
+                timeout=3.5
+            )
+        except Exception:
+            # 超時或出錯自動啟動溫馨防線
+            welcome_msg = "大家安安！哈囉，你上線啦，風子！今天我們也要開開心心一起寫扣和實況互動喔！"
+            audio_bytes = None
+            
     print(f"{MAGENTA}{BOLD}Gemini：{RESET}")
     print(welcome_msg + "\n")
     
-    # 開場親切語音問候 (非阻塞式 macOS say 語音)
-    try:
-        # 清除顏文字以確保語音發音流暢
-        clean_welcome = welcome_msg.replace("(〃∀〃)", "").replace("┐(´д`)┌", "").replace("\n", " ")
-        subprocess.Popen(
-            ["say", "-v", "Mei-Jia", clean_welcome],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
-    except Exception:
-        pass
+    # 播放開場親切語音 (優先使用 Native Audio，若無則自動使用本地 TTS)
+    if audio_bytes:
+        engine.play_native_audio(audio_bytes)
+    else:
+        engine.speak_tts(welcome_msg)
 
     # 建立非同步使用者輸入佇列
     user_input_queue = asyncio.Queue()
@@ -63,6 +73,7 @@ async def keyboard_input_loop(engine, user_input_queue):
     """非同步非阻塞讀取鍵盤輸入，並送入實時發送佇列"""
     while True:
         try:
+            # 非同步讀取鍵盤終端機輸入 (保留鍵盤操作，作為雙模輸入)
             loop = asyncio.get_event_loop()
             user_input = await loop.run_in_executor(None, lambda: input(f"{BOLD}風子 (或觀眾) >>> {RESET}"))
             
@@ -70,9 +81,10 @@ async def keyboard_input_loop(engine, user_input_queue):
             if not user_input:
                 continue
                 
+            # pyrefly: ignore [parse-error]
             if user_input.lower() in ["exit", "quit"]:
                 await engine.distill_and_archive_memory()
-                sys.exit(0)
+                break
                 
             elif user_input.lower() == "status":
                 engine.display_status()
@@ -84,15 +96,15 @@ async def keyboard_input_loop(engine, user_input_queue):
                     await engine.switch_project(parts[1])
                 continue
                 
-            # 將輸入發送給 Live Session 佇列處理
-            await user_input_queue.put(user_input)
-            # 給予一點緩衝時間讓回應能完整輸出
-            await asyncio.sleep(0.1)
+            # 💡 核心修正：直接調用 execute_query，繞過會崩潰的 Live WebSocket
+            # 這會自動判斷關鍵字、驅動 OBS 截圖、並呼叫 generate_gemini_real_response 播放原生 WAV 語音
+            await engine.execute_query(user_input)
             
-        except (asyncio.CancelledError, KeyboardInterrupt):
+        except KeyboardInterrupt:
+            await engine.distill_and_archive_memory()
             break
         except Exception as e:
-            print(f"\033[91m[KEYBOARD ERROR] {e}\033[RESET]")
+            print(f"\n\033[91m[CONSOLES ERROR] {e}\033[0m")
 
 
 if __name__ == "__main__":

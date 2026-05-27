@@ -14,3 +14,4 @@
 
 3. 實況主名詞解釋
    - 你(gemini)的分身: 只說google AI任何產品,或是只android studio , google antigravity, google cloud, google fireebase等 的AI
+   - 你: 指gemini
