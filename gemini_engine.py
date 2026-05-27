@@ -1371,11 +1371,36 @@ class GeminiStreamEngine:
                     # 限制最少音訊長度為 0.5 秒 (以防環境噪聲誤判)
                     # 16000Hz * 2bytes(Int16) * 0.5s = 16000 bytes
                     if len(audio_to_process) >= 16000:
+                        import struct
+                        import math
+                        
+                        # 聲音數據分析 (長度, 資料大小, 平均音量 RMS)
+                        duration = len(audio_to_process) / 32000.0
+                        size_kb = len(audio_to_process) / 1024.0
+                        
+                        num_samples = len(audio_to_process) // 2
+                        samples = struct.unpack(f"{num_samples}h", audio_to_process)
+                        rms = 0.0
+                        if samples:
+                            rms = math.sqrt(sum(s**2 for s in samples) / len(samples))
+                        volume_pct = (rms / 32768.0) * 100
+                        
+                        # 即時於 CLI 介面輸出聲音分析結果
+                        print(f"\n{CYAN}[🔊 AUDIO ANALYZING]{RESET} 正在分析已接收的語音信號...")
+                        print(f" ├─ 音訊長度: {duration:.2f} 秒 | 封包大小: {size_kb:.1f} KB")
+                        print(f" └─ 平均音量: {rms:.1f} RMS ({volume_pct:.1f}%)")
+                        
+                        # 開始 ASR 轉譯並計算耗時
+                        t_start = time.time()
                         text = await self._transcribe_audio(audio_to_process)
+                        latency = time.time() - t_start
+                        
                         if text:
-                            print(f"\n{GREEN}[🎤 WEB MIC HEARD]{RESET} {text}")
+                            print(f"{GREEN}[🎤 WEB MIC HEARD]{RESET} (辨識耗時: {latency:.2f}s) ─ {text}")
                             # 執行引擎互動，秒級響應
                             await self.execute_query(text)
+                        else:
+                            print(f"{YELLOW}[🎤 WEB MIC HEARD]{RESET} (辨識耗時: {latency:.2f}s) ─ [未偵測到有效語意/環境噪聲]")
                             
                     self.is_processing_asr = False
             except asyncio.CancelledError:
