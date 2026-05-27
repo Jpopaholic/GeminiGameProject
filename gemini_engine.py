@@ -122,9 +122,8 @@ class GeminiStreamEngine:
         
         # 互動歷程計數器 (供動態更新與日記提煉)
         self.session_logs = []
-        self.chicken_steak_count = 0  # 本日新增雞排欠債
-        self.roast_count = 0          # 本日吐槽次數
-        self.vibe_score = 90          # 動態氣氛分數
+        self.roast_count = 0          # 本日對話次數 (動態統計)
+        self.vibe_score = 90          # 動態氣氛分數 (通用實況氣氛)
         self.api_exhausted = False    # 標記 API 額度是否耗盡
         
         # 載入設定與插件
@@ -468,21 +467,12 @@ class GeminiStreamEngine:
                 # 執行數值變化效果 (effects)
                 effects = trigger.get("effects", {})
                 
-                # 新增雞排欠債 delta
-                delta_steak = effects.get("chicken_steak_delta", 0)
-                self.chicken_steak_count += delta_steak
-                
                 # 氣氛值變化 delta
                 delta_vibe = effects.get("vibe_score_delta", 0)
                 self.vibe_score = max(0, min(100, self.vibe_score + delta_vibe))
                 
-                # 格式化輸出模板，動態帶入計算變數
-                accumulated_debt = 142 + self.chicken_steak_count
                 raw_response = trigger.get("response", "")
-                
-                # 安全渲染變數
-                formatted_response = raw_response.replace("{accumulated_debt}", str(accumulated_debt))
-                return formatted_response
+                return raw_response
 
         # 4. 兜底回覆：若無匹配到任何自定義關鍵字，隨機從 default_responses 中提取一個
         default_resps = self.plugin_config.get("default_responses", [])

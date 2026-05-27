@@ -210,7 +210,7 @@ game_tools/
       "keywords": ["關鍵字1", "關鍵字2"],
       "response": "本地優先的回覆台詞。",
       "effects": {
-        "chicken_steak_delta": 5,
+        "custom_score_delta": 5,
         "vibe_score_delta": -3
       }
     }
@@ -224,7 +224,7 @@ game_tools/
 **`effects` 欄位說明：**
 | 欄位 | 功能 |
 |------|------|
-| `chicken_steak_delta` | 觸發時本地累積計數器變化值 |
+| `custom_score_delta` | 觸發時自訂本地計數分數變化值（如特定項目累積點數） |
 | `vibe_score_delta` | 觸發時影響當前實況氣氛值（0~100） |
 
 #### `skills/*.txt` 知識庫格式
