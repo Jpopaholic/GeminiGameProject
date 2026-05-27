@@ -49,6 +49,10 @@ async def main():
             welcome_msg = f"大家安安！哈囉，你上線啦，{engine.streamer_name}！今天我們也要開開心心一起寫扣和實況互動喔！"
             audio_bytes = None
             
+    # 如果生成的開場白為 None，自動啟用預設開場白
+    if welcome_msg is None:
+        welcome_msg = f"大家安安！哈囉，你上線啦，{engine.streamer_name}！今天我們也要開開心心一起寫扣和實況互動喔！"
+            
     print(f"{MAGENTA}{BOLD}Gemini：{RESET}")
     print(welcome_msg + "\n")
     
