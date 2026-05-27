@@ -1456,6 +1456,16 @@ class GeminiStreamEngine:
                 wav_file.writeframes(pcm_data)
             wav_buf.seek(0)
             
+            # 同時寫入本地暫存音檔，提供給實況主播放，100% 精準排查與聽取麥克風音質、音量、取樣率
+            import os
+            debug_path = os.path.join(self.base_dir, "session_memories", "temp_mic.wav")
+            try:
+                os.makedirs(os.path.dirname(debug_path), exist_ok=True)
+                with open(debug_path, "wb") as f:
+                    f.write(wav_buf.getvalue())
+            except Exception:
+                pass
+            
             # 使用 SpeechRecognition 的 AudioFile 解析
             recognizer = sr.Recognizer()
             with sr.AudioFile(wav_buf) as source:
