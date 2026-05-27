@@ -503,8 +503,8 @@ class GeminiStreamEngine:
             )
         return assembled
 
-    async def generate_gemini_real_response(self, user_input, is_visual=False, image_bytes=None):
-        """串接真實 Gemini 2.5 Flash Native Audio Modality，支援視覺與語音輸出"""
+    async def generate_gemini_real_response(self, user_input, is_visual=False, image_bytes=None, capture_method=None):
+        """串接真實 Gemini 2.5/3.5 Flash Native Audio Modality，支援視覺與語音輸出"""
         if not self.client:
             # 當無 API 連線時，降級至本地模擬文字
             return self.generate_gemini_response(user_input, is_visual=is_visual), None
@@ -538,7 +538,10 @@ class GeminiStreamEngine:
                 )
                 contents.append(img_part)
                 # 💡 新增超吸睛畫面對接成功日誌！
-                print(f"{GREEN}{BOLD}[👀 VISION LINK] 成功將螢幕畫面 (480p) 送入 Gemini 聯網大腦！助理正在盯著您的螢幕看囉！{RESET}")
+                source_str = "OBS WebSocket" if capture_method == "OBS_WEBSOCKET" else "mss 本機全螢幕擷取"
+                if capture_method == "MOCK_FILE":
+                    source_str = "test_gameplay.jpg 備用圖檔"
+                print(f"{GREEN}{BOLD}[👀 VISION LINK] 成功透過 [{source_str}] 擷取畫面 (480p) 送入 Gemini 聯網大腦！助理正在盯著您的實況螢幕看囉！{RESET}")
             except Exception as e:
                 print(f"{RED}[IMAGE PACK ERROR] 圖片物件封裝失敗: {e}{RESET}")
             
@@ -877,7 +880,8 @@ class GeminiStreamEngine:
             ai_response, audio_bytes = await self.generate_gemini_real_response(
                 user_input, 
                 is_visual=is_visual_trigger, 
-                image_bytes=image_bytes
+                image_bytes=image_bytes,
+                capture_method=capture_method
             )
         else:
             # 降級至本地模擬
