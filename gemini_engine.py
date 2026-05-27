@@ -1348,6 +1348,14 @@ class GeminiStreamEngine:
         try:
             self.ears_server = await websockets.serve(audio_handler, "localhost", 9002)
             print(f"{GREEN}[🔊 CYBER EARS] 語音側聽伺服器已成功開啟在 ws://localhost:9002 (輸入模式: {self.input_mode}){RESET}")
+            print(f" ├─ {YELLOW}💡 【麥克風權限與瀏覽器安全性提示】{RESET}")
+            print(f" ├─ 因瀏覽器隱私安全限制，Web Audio 麥克風必須在「安全上下文 (Secure Context)」中運作！")
+            print(f" ├─ {RED}警告：請勿{RESET} 直接雙擊點開網頁檔 (網址顯示 file://...)，這會導致瀏覽器基於安全原則直接封鎖麥克風！")
+            print(f" ├─ {GREEN}正確使用方案：{RESET}")
+            print(f" │  1. 請在您的專案根目錄另開終端機執行：{CYAN}python -m http.server 8000{RESET}")
+            print(f" │  2. 在瀏覽器或 OBS 瀏覽器來源載入網址：{UNDERLINE}http://localhost:8000/stream_overlay/index.html{RESET}")
+            print(f" │  3. 點擊彈出的「允許使用麥克風」，並在網頁內隨意點擊一下以啟用音訊上下文。")
+            print(f" └─────────────────────────────────────────────────────────────")
             # 啟動非同步靜音檢測任務
             self.vad_task = asyncio.create_task(self._vad_asr_loop())
         except Exception as e:
