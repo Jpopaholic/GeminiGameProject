@@ -131,12 +131,15 @@ class GeminiStreamEngine:
 
         # 初始化真實 Gemini API 客戶端
         self.client = None
+        self.live_client = None
         self.chat_history = []  # 對話上下文
         
         if HAS_GEMINI_SDK and self.api_key and self.api_key != "YOUR_GEMINI_API_KEY_HERE" and len(self.api_key) > 10:
             try:
-                # 建立真實 Gemini 客戶端，設定使用 v1alpha API 版本以完美支援 Live (bidi) WebSocket 串流
-                self.client = genai.Client(api_key=self.api_key, http_options={'api_version': 'v1alpha'})
+                # 建立標準對答客戶端（使用預設穩定版本，完美支援 gemini-3.5-flash 等最新 GA 模型）
+                self.client = genai.Client(api_key=self.api_key)
+                # 建立 WebSocket Live 專用客戶端（使用 v1alpha，完美支援 2.0 Live bidi 串流）
+                self.live_client = genai.Client(api_key=self.api_key, http_options={'api_version': 'v1alpha'})
             except Exception as e:
                 print(f"{RED}[SDK ERROR] 初始化 Gemini 聯網客戶端失敗: {e}{RESET}")
                 
@@ -1041,8 +1044,8 @@ class GeminiStreamEngine:
 
     async def run_live_session(self, user_input_queue):
         """主 Live Session WebSocket 連線迴圈，支援流式雙向文字與語音對答"""
-        if not self.client:
-            print(f"\n{RED}[LIVE ERROR] 尚未初始化 Gemini 客戶端，無法啟動 Live API。請在 config.json 中設定有效金鑰。{RESET}")
+        if not self.live_client:
+            print(f"\n{RED}[LIVE ERROR] 尚未初始化 Gemini Live 客戶端，無法啟動 Live API。請在 config.json 中設定有效金鑰。{RESET}")
             return
             
         # 💡 WebSocket Live API (bidi) 在 v1alpha 下專用代號必須為 gemini-2.0-flash-exp
@@ -1063,8 +1066,8 @@ class GeminiStreamEngine:
         print(f" └─ 支援模態: {GREEN}{modalities}{RESET}")
         
         try:
-            # 透過 aio.live.connect 開啟底層雙向音訊/文字通道
-            async with self.client.aio.live.connect(model=model_name, config=config) as session:
+            # 透過 live_client.aio.live.connect 開啟底層雙向音訊/文字通道
+            async with self.live_client.aio.live.connect(model=model_name, config=config) as session:
                 print(f"\n{GREEN}[SUCCESS]{RESET} 賽博大腦長連接已解鎖！Gemini Live 語音通道正式上線！(〃∀〃)")
                 
                 # 建立併發任務：一個負責發送事件、一個負責接收大腦的原生回傳
