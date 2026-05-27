@@ -126,6 +126,7 @@ class GeminiStreamEngine:
         self.vibe_score = 90          # 動態氣氛分數 (通用實況氣氛)
         self.api_exhausted = False    # 標記 API 額度是否耗盡
         self.is_speaking = False      # 標記助理當前是否正在發言（用於防回音防重複觸發）
+        self.is_quota_warning = False  # 標記是否正處於額度用完/限流警告狀態
         
         # 載入設定與插件
         self.reload_profiles()
@@ -622,6 +623,8 @@ class GeminiStreamEngine:
         except Exception as e:
             err_msg = str(e)
             if "RESOURCE_EXHAUSTED" in err_msg or "429" in err_msg:
+                self.api_exhausted = True
+                self.is_quota_warning = True
                 print(f"\n{BG_RED}{BOLD}[🚨 API RESOURCE EXHAUSTED 🚨] Gemini API 額度或速率限制已耗盡 (RESOURCE_EXHAUSTED)！{RESET}")
                 print(f"{YELLOW}💡 提示：您可以稍等一分鐘重試，或者修改 config.json 切換到別的模型（例如從 gemini-2.5-flash 切換到 gemini-3.5-flash）！{RESET}\n")
                 
@@ -632,6 +635,7 @@ class GeminiStreamEngine:
                 # 非同步等待以讓語音播放
                 await asyncio.sleep(4.0)
                 self.set_speaking_state(False)
+                self.is_quota_warning = False
             else:
                 print(f"\n{RED}[GEMINI API ERROR] API 呼叫失敗: {e}。自動防護降級為本地模擬...{RESET}")
             return self.generate_gemini_response(user_input, is_visual=is_visual), None
@@ -874,8 +878,8 @@ class GeminiStreamEngine:
     async def execute_query(self, user_input):
         """執行一輪語音/聊天室互動，並實施 TPM 限額防禦"""
         user_input_lower = user_input.lower()
-        # 安全雙重防禦鎖：若助理正在發言，且非管理控制指令，直接忽略該次對話請求（防爆音防併發）
-        if getattr(self, 'is_speaking', False) and user_input_lower not in ["exit", "quit", "status"] and not user_input_lower.startswith("switch "):
+        # 安全雙重防禦鎖：若助理正在發言或處於額度保護警告狀態，且非管理控制指令，直接忽略該次對話請求
+        if (getattr(self, 'is_speaking', False) or getattr(self, 'is_quota_warning', False)) and user_input_lower not in ["exit", "quit", "status"] and not user_input_lower.startswith("switch "):
             return
             
         # 1. 偵測 VAD 關鍵字與 Gemini 呼喚
@@ -932,6 +936,7 @@ class GeminiStreamEngine:
         
         if tpm_status == "EXCEEDED":
             # 觸發安全流量守護防線！
+            self.is_quota_warning = True
             print(f"\n{BG_RED}{BOLD}[🚨 TPM LIMIT BURST 🚨] 偵測到 1M TPM 警戒線已安全超載！啟動自動流量守護防線！{RESET}")
             await asyncio.sleep(0.5)
             print(f"\n{MAGENTA}{BOLD}Gemini：{RESET}")

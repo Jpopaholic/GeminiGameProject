@@ -101,6 +101,11 @@ async def keyboard_input_loop(engine, user_input_queue):
             if not user_input:
                 continue
                 
+            # 當大腦額度或流量爆表（限流保護中），鎖定鍵盤對答輸入以確保使用者體驗與頻寬安全
+            if getattr(engine, 'is_quota_warning', False) and user_input.lower() not in ["exit", "quit", "status"] and not user_input.lower().startswith("switch "):
+                print(f"\n{RED}[⚠️ 額度保護中] Gemini 的大腦額度已耗盡或處於頻寬限流狀態！輸入暫時鎖定，請稍候或修改設定檔切換模型！{RESET}")
+                continue
+                
             # 當助理正在發言（且非管理控制指令），鎖定鍵盤對答輸入以確保使用者體驗
             if getattr(engine, 'is_speaking', False) and user_input.lower() not in ["exit", "quit", "status"] and not user_input.lower().startswith("switch "):
                 print(f"\n{YELLOW}[⚠️ 助理發言中] Gemini 正在回答中，輸入已鎖定。請等她說完再發問喔！{RESET}")
