@@ -35,13 +35,13 @@ async def main():
     
     if engine.client:
         try:
-            # ⚡ 建立 3.5 秒防卡死超時防線：若 Gemini 思考超時或 API 連線卡住，自動秒級降級為溫馨預設歡迎詞
+            # ⚡ 增加超時防線至 8.0 秒，避免冷啟動 DNS/SSL 握手延遲導致直接觸發備援開場白
             welcome_msg, audio_bytes = await asyncio.wait_for(
                 engine.generate_gemini_real_response(welcome_prompt, is_visual=False),
-                timeout=3.5
+                timeout=8.0
             )
-        except Exception:
-            # 超時或出錯自動啟動溫馨防線
+        except Exception as e:
+            # 超時或出錯自動啟動備用防線
             welcome_msg = "大家安安！哈囉，你上線啦，風子！今天我們也要開開心心一起寫扣和實況互動喔！"
             audio_bytes = None
             
