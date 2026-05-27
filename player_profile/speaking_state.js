@@ -1,1 +1,1 @@
-window.speakingState = {"speaking": false, "text": "", "timestamp": 1779901347.9406672};
+window.speakingState = {"speaking": false, "text": "", "timestamp": 1779904416.0633554};
