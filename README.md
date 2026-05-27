@@ -75,7 +75,7 @@ chmod +x setup_dependencies.sh
 *(此指令碼將會透過 Homebrew 安裝 `portaudio`，並藉由 `pip` 安裝 `pyaudio`、`google-genai`、`speechrecognition`、`obsws-python`、`mss` 與 `pillow` 等核心相依庫。)*
 
 ### 2. 進行設定
-請複製 [player_profile/config.template.json](file:///Users/jpopaholic/Documents/GeminiGameProject/player_profile/config.template.json) 並命名為 `config.json`，同樣將 [player_profile/host_info.template.txt](file:///Users/jpopaholic/Documents/GeminiGameProject/player_profile/host_info.template.txt) 複製並命名為 `host_info.txt`：
+請複製 [player_profile/config.template.json](player_profile/config.template.json) 並命名為 `config.json`，同樣將 [player_profile/host_info.template.txt](player_profile/host_info.template.txt) 複製並命名為 `host_info.txt`：
 ```json
 {
   "active_project": "vibe_coding",
@@ -83,15 +83,20 @@ chmod +x setup_dependencies.sh
     "host": "localhost",
     "port": 4455,
     "password": "您的OBS_WS密碼",
-    "enabled": false
+    "enabled": false,
+    "source_name": ""
   },
-  "game_audio_device": "BlackHole 2ch",
+  "game_audio_device": "none",
   "tpm_safety_limit": 1000000,
+  "tpm_warning_threshold": 850000,
   "streamer_name": "您的名字",
   "gemini_api_key": "您的_GEMINI_API_KEY",
-  "gemini_voice": "Aoede"
+  "gemini_voice": "Aoede",
+  "gemini_model": "gemini-2.5-flash"
 }
 ```
+* **`gemini_model`**：大腦問答模型，預設為 `gemini-2.5-flash`。若 2.5 Flash 金鑰限額用完，可自由更改為 `gemini-3.5-flash` 等其他活躍模型實現秒級熱切換！
+* **`source_name`**：自訂 OBS 擷取圖層/來源名稱（如：`"遊戲擷取"` 或 `"視窗擷取"`）。若保持空字串 `""` 則自動智慧擷取當前 OBS 最外層 Program 場景畫面。
 
 ### 3. 驗證引擎功能
 在正式開播前，可使用以下指令碼驗證引擎的視覺擷取降級備份、語音 Instruction 組合等功能是否完全正常：
