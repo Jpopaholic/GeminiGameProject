@@ -21,6 +21,10 @@ async def main():
     # 載入核心解耦引擎
     engine = GeminiStreamEngine()
     engine.print_splash()
+    
+    # 啟動 WebSocket 語音側聽伺服器 (賽博耳朵) - 只在 input_mode 為 voice 或 both 時啟動
+    if engine.input_mode in ["voice", "both"] and hasattr(engine, 'start_ears_server'):
+        await engine.start_ears_server()
     # 呼叫 Gemini 動態生成開場歡迎詞
     welcome_prompt = (
         f"請為實況主「{engine.streamer_name}」生成一個親切、活潑且帶有你傲嬌又溫馨性格的開台歡迎問候詞！\n"

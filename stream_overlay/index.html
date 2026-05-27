@@ -601,6 +601,92 @@
             }, 150);
         });
 
+        // --- 模式 3：寫法 B - OBS 網頁圖層 HTML5 語音側聽與 WebSocket 實時傳輸 ---
+        let wsEars;
+        let audioContextEars;
+        let scriptNodeEars;
+        let micSourceEars;
+
+        async function startEarsStreaming() {
+            try {
+                // 連接本地 ASR 監聽伺服器
+                wsEars = new WebSocket('ws://localhost:9002');
+                wsEars.binaryType = 'arraybuffer';
+                
+                wsEars.onopen = () => {
+                    console.log("已連線本地語音監聽伺服器！");
+                    modeToggle.innerText = "模式: 語音監聽 & 鍵盤雙向 (連線成功)";
+                    modeToggle.style.color = "var(--gemini-cyan)";
+                };
+                
+                wsEars.onclose = () => {
+                    console.log("語音監聽伺服器斷開，3 秒後重連...");
+                    modeToggle.innerText = "模式: 語音監聽斷開 (嘗試重連中...)";
+                    modeToggle.style.color = "#e53e3e";
+                    setTimeout(startEarsStreaming, 3000);
+                };
+                
+                wsEars.onerror = (e) => {
+                    console.error("語音監聽 WebSocket 錯誤:", e);
+                };
+
+                // 取得麥克風音訊
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    }, 
+                    video: false 
+                });
+
+                // 限制取樣率為 16000Hz 以適應 ASR 模型
+                audioContextEars = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                micSourceEars = audioContextEars.createMediaStreamSource(stream);
+                
+                // 單聲道輸入，緩衝區 4096
+                scriptNodeEars = audioContextEars.createScriptProcessor(4096, 1, 1);
+                
+                scriptNodeEars.onaudioprocess = (audioProcessingEvent) => {
+                    if (!wsEars || wsEars.readyState !== WebSocket.OPEN) return;
+                    
+                    const inputBuffer = audioProcessingEvent.inputBuffer;
+                    const inputData = inputBuffer.getChannelData(0); // 16kHz Float32Array
+                    
+                    // 轉為 16-bit PCM (Int16) 數據
+                    const pcmData = new Int16Array(inputData.length);
+                    for (let i = 0; i < inputData.length; i++) {
+                        const s = Math.max(-1, Math.min(1, inputData[i]));
+                        pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                    }
+                    
+                    // 發送二進位 PCM 音訊資料
+                    wsEars.send(pcmData.buffer);
+                };
+                
+                micSourceEars.connect(scriptNodeEars);
+                scriptNodeEars.connect(audioContextEars.destination);
+                console.log("OBS 賽博耳朵已就緒！實時串流 16kHz PCM 音訊...");
+                
+            } catch (err) {
+                console.error("初始化麥克風語音側聽失敗:", err);
+                modeToggle.innerText = "模式: 語音監聽啟動失敗 (無麥克風權限)";
+                modeToggle.style.color = "#e53e3e";
+            }
+        }
+
+        // 頁面加載後自動連線
+        window.addEventListener('load', () => {
+            startEarsStreaming();
+        });
+
+        // 用戶點擊手勢恢復 AudioContext
+        window.addEventListener('click', () => {
+            if (audioContextEars && audioContextEars.state === 'suspended') {
+                audioContextEars.resume();
+            }
+        });
+
     </script>
 </body>
 </html>

@@ -174,11 +174,13 @@ class GeminiStreamEngine:
         # API 金鑰與模型加載安全通道 (環境變數優先，其次是 config.json)
         self.api_key = os.environ.get("GEMINI_API_KEY") or self.config.get("gemini_api_key", "")
         self.gemini_model = self.config.get("gemini_model", "gemini-2.5-flash")
+        self.input_mode = self.config.get("input_mode", "both")
 
     def save_config(self):
         config_path = os.path.join(self.base_dir, "player_profile", "config.json")
         self.config["active_project"] = self.active_project
         self.config["gemini_model"] = self.gemini_model
+        self.config["input_mode"] = self.input_mode
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(self.config, f, indent=2, ensure_ascii=False)
 
@@ -283,9 +285,17 @@ class GeminiStreamEngine:
         print(f"{CYAN}{BOLD}========================================================================={RESET}")
         print(f"{BOLD} 【實況主人背景】{RESET} {GREEN}已載入 ({self.streamer_name}){RESET}")
         print(f"{BOLD} 【大腦靈魂設定】{RESET} {GREEN}已載入 (Gemini / 實況助理核心){RESET}")
-        print(f"{BOLD} 【雙向聽覺系統】{RESET} {GREEN if HAS_SPEECH else YELLOW}已配置 ({'雙通道背景音訊監聽' if HAS_SPEECH else '純鍵盤降級模式'}){RESET}")
+        print(f"{BOLD} 【雙向聽覺系統】{RESET} {GREEN if HAS_SPEECH else YELLOW}已配置 (OBS Web 麥克風側聽伺服器){RESET}")
         print(f"{BOLD} 【當前插件外掛】{RESET} {YELLOW}{BOLD}{display_name}{RESET} {GREEN}已載入 ({len(self.game_skills)} 個常識庫檔案){RESET}")
         print(f"{BOLD} 【近期日記記憶】{RESET} {GREEN}已喚醒最近 {len(self.loaded_memories)} 場直播記憶日記{RESET}")
+        
+        # 顯示輸入模式狀態
+        mode_str = "雙模並存 (鍵盤打字 + OBS Web 語音側聽)"
+        if self.input_mode == "keyboard":
+            mode_str = "純鍵盤模式 (語音監聽已停用)"
+        elif self.input_mode == "voice":
+            mode_str = "純語音模式 (鍵盤作為備援)"
+        print(f"{BOLD} 【實況輸入模式】{RESET} {GREEN if self.input_mode != 'keyboard' else YELLOW}{mode_str}{RESET}")
         
         # 顯示 API Key 加載與客戶端狀態
         if self.client:
@@ -1082,6 +1092,15 @@ class GeminiStreamEngine:
                 self.mic_stop_listening(wait_for_stop=False)
             except Exception:
                 pass
+                
+        # 關閉背景語音伺服器與任務，防堵 memory leak
+        if hasattr(self, 'vad_task') and self.vad_task:
+            self.vad_task.cancel()
+        if hasattr(self, 'ears_server') and self.ears_server:
+            try:
+                self.ears_server.close()
+            except Exception:
+                pass
             
         print(f"{GREEN}[SUCCESS]{RESET} 成功為今日實況日記建檔！")
         print(f" ├─ 日記路徑: {UNDERLINE}session_memories/{filename}{RESET}")
@@ -1295,3 +1314,104 @@ class GeminiStreamEngine:
                 user_input_queue.task_done()
         except asyncio.CancelledError:
             pass
+
+    async def start_ears_server(self):
+        """啟動背景 WebSocket 賽博耳朵音訊接收伺服器 (ws://localhost:9002)"""
+        if self.input_mode == "keyboard":
+            print(f"\n{YELLOW}[🔊 CYBER EARS] 當前輸入模式為 '純鍵盤模式'，語音側聽伺服器不啟動。{RESET}")
+            return
+
+        import websockets
+        
+        # 初始化音訊接收緩衝與狀態
+        self.pcm_buffer = bytearray()
+        self.last_audio_time = time.time()
+        self.is_processing_asr = False
+        
+        async def audio_handler(websocket):
+            print(f"\n{GREEN}[🔊 CYBER EARS] OBS Web 麥克風已連線就緒！{RESET}")
+            try:
+                async for message in websocket:
+                    if isinstance(message, bytes):
+                        self.pcm_buffer.extend(message)
+                        self.last_audio_time = time.time()
+                        
+                        # 緩衝區防溢出限制：累積若超過 15 秒音訊，清空防止 OOM
+                        if len(self.pcm_buffer) > 16000 * 2 * 15:
+                            self.pcm_buffer.clear()
+            except websockets.exceptions.ConnectionClosed:
+                pass
+            finally:
+                print(f"\n{YELLOW}[🔊 CYBER EARS] OBS Web 麥克風連線已斷開。{RESET}")
+                
+        # 啟動非同步伺服器連線
+        try:
+            self.ears_server = await websockets.serve(audio_handler, "localhost", 9002)
+            print(f"{GREEN}[🔊 CYBER EARS] 語音側聽伺服器已成功開啟在 ws://localhost:9002 (輸入模式: {self.input_mode}){RESET}")
+            # 啟動非同步靜音檢測任務
+            self.vad_task = asyncio.create_task(self._vad_asr_loop())
+        except Exception as e:
+            print(f"{RED}[🔊 CYBER EARS ERROR] 開啟語音監聽伺服器失敗: {e}{RESET}")
+
+    async def _vad_asr_loop(self):
+        """實時靜音 VAD 檢測與 ASR 辨識觸發迴圈"""
+        while True:
+            try:
+                await asyncio.sleep(0.1)
+                
+                now = time.time()
+                # 判定靜音：緩衝區有音訊數據，且最後一次接收音訊時間距離現在大於 0.8 秒 (說話完畢並靜音中)
+                if len(self.pcm_buffer) > 0 and (now - self.last_audio_time > 0.8) and not self.is_processing_asr:
+                    self.is_processing_asr = True
+                    
+                    # 拷貝音訊數據並重設緩衝區
+                    audio_to_process = bytes(self.pcm_buffer)
+                    self.pcm_buffer.clear()
+                    
+                    # 限制最少音訊長度為 0.5 秒 (以防環境噪聲誤判)
+                    # 16000Hz * 2bytes(Int16) * 0.5s = 16000 bytes
+                    if len(audio_to_process) >= 16000:
+                        text = await self._transcribe_audio(audio_to_process)
+                        if text:
+                            print(f"\n{GREEN}[🎤 WEB MIC HEARD]{RESET} {text}")
+                            # 執行引擎互動，秒級響應
+                            await self.execute_query(text)
+                            
+                    self.is_processing_asr = False
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.is_processing_asr = False
+                await asyncio.sleep(0.5)
+
+    async def _transcribe_audio(self, pcm_data):
+        """將 PCM 二進位數據轉為 WAV 並非同步執行語意辨識"""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._sync_transcribe, pcm_data)
+
+    def _sync_transcribe(self, pcm_data):
+        """同步打包與進行 ASR 辨識 (台灣繁體中文 Google ASR)"""
+        import io
+        import wave
+        import speech_recognition as sr
+        
+        try:
+            # 將 PCM 封裝成標準 WAV 位元組
+            wav_buf = io.BytesIO()
+            with wave.open(wav_buf, 'wb') as wav_file:
+                wav_file.setnchannels(1)      # 單聲道
+                wav_file.setsampwidth(2)     # 16-bit Int16
+                wav_file.setframerate(16000) # 16kHz
+                wav_file.writeframes(pcm_data)
+            wav_buf.seek(0)
+            
+            # 使用 SpeechRecognition 的 AudioFile 解析
+            recognizer = sr.Recognizer()
+            with sr.AudioFile(wav_buf) as source:
+                audio_data = recognizer.record(source)
+                
+            # 使用 Google Web ASR 辨識台灣繁體中文 (免費且極其高速準確，免 PyAudio compiled)
+            text = recognizer.recognize_google(audio_data, language="zh-TW").strip()
+            return text if len(text) > 0 else None
+        except Exception:
+            return None

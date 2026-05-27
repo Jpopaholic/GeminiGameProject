@@ -94,10 +94,12 @@ chmod +x setup_dependencies.sh
   "tpm_warning_threshold": 850000,
   "streamer_name": "您的名字",
   "gemini_api_key": "您的_GEMINI_API_KEY",
-  "gemini_model": "gemini-2.5-flash"
+  "gemini_model": "gemini-2.5-flash",
+  "input_mode": "both"
 }
 ```
 * **`gemini_model`**：大腦問答模型，預設為 `gemini-2.5-flash`。若 2.5 Flash 金鑰限額用完，可自由更改為 `gemini-3.5-flash` 等其他活躍模型實現秒級熱切換！
+* **`input_mode`**：實況主輸入管道。支援 `"keyboard"`（純鍵盤對談，關閉背景語音伺服器以節省資源）、`"voice"`（純語音側聽模式）、與 `"both"`（預設，語音+鍵盤雙模雙工同時啟用，鍵盤隨時可作打字備援）。
 * **`source_name`**：自訂 OBS 擷取圖層/來源名稱（如：`"遊戲擷取"` 或 `"視窗擷取"`）。若保持空字串 `""` 則自動智慧擷取當前 OBS 最外層 Program 場景畫面。
 * **`enabled`** (位於 `obs_websocket` 內)：**重要提醒！** 若要使用 OBS 畫面擷取，請務必將此欄位設為 **`true`**，否則引擎會因為安全降級防線，自動改為擷取您的本機實體螢幕畫面！
 
@@ -112,7 +114,7 @@ python3 test_engine.py
 ```bash
 python3 main.py
 ```
-* 互動模式：**語音辨識功能目前仍在開發階段，目前僅支援透過鍵盤 CLI 終端機進行文字輸入互動！**
+* 互動模式：支援 **「鍵盤 CLI 終端機打字輸入」** 與 **「OBS 網頁圖層麥克風語音側聽 (寫法 B)」** 雙工輸入。當您在 `config.json` 開啟 `"input_mode": "voice"` 或 `"both"` 時，引擎會自動在背景啟動語音側聽伺服器，此時只需載入 OBS 圖層（或以瀏覽器打開圖層頁面）並對著麥克風講話，暫停說話一秒內即可驅動語音對答！
 * 輸入 `status`：查看當前安全額度消耗、專案與 OBS 連線狀態。
 * 輸入 `switch vibe_coding` 或 `switch gw2`：動態切換實況主題。
 * 輸入 `exit`：安全提煉記憶並存檔收播。
