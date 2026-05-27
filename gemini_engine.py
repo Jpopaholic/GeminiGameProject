@@ -1045,9 +1045,8 @@ class GeminiStreamEngine:
             print(f"\n{RED}[LIVE ERROR] 尚未初始化 Gemini 客戶端，無法啟動 Live API。請在 config.json 中設定有效金鑰。{RESET}")
             return
             
-        # 💡 終極修正點：Live API WebSocket (bidi) 專用代號已更新為正式版 gemini-2.0-flash
-        # 舊版 exp 已被 Google 關閉而會噴 404/1008 錯誤
-        model_name = "gemini-2.0-flash"
+        # 💡 WebSocket Live API (bidi) 在 v1alpha 下專用代號必須為 gemini-2.0-flash-exp
+        model_name = "gemini-2.0-flash-exp"
         
         # 決定回應模態 (若有 PyAudio 則開啟語音，否則為純文字)
         modalities = ["TEXT"]
