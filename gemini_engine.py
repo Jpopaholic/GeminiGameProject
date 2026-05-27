@@ -854,12 +854,12 @@ class GeminiStreamEngine:
         
         is_casual_mode = not self.active_project or self.active_project.lower() == "none"
         
-        # 視覺截圖動作 (is_visual_trigger) 必須同時提及 "你看" 與 "gemini"
-        # 若為閒談模式，則不進行截圖
-        is_visual_trigger = (("你看" in user_input and is_gemini_called) or is_audio_event) and not is_casual_mode
+        # 視覺截圖動作 (is_visual_trigger)：必須包含召喚語且提到 [你看、看下、看這、看到、擷取、截圖、眼睛、畫面] 其中任一詞
+        is_visual_word_present = any(kw in user_input for kw in ["你看", "看下", "看這", "看到", "擷取", "截圖", "眼睛", "畫面"])
+        is_visual_trigger = ((is_visual_word_present and is_gemini_called) or is_audio_event) and not is_casual_mode
         
         # 一般關鍵字連動觸發條件 (免截圖)
-        is_keyword_trigger = any(kw in user_input for kw in ["你看", "誇張"]) or is_gemini_called
+        is_keyword_trigger = any(kw in user_input for kw in ["你看", "看下", "看這", "看到", "擷取", "截圖", "眼睛", "畫面", "誇張"]) or is_gemini_called
         
         image_bytes = None
         capture_method = None
