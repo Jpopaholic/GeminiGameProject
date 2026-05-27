@@ -168,12 +168,14 @@ class GeminiStreamEngine:
                 "tpm_warning_threshold": 850000,
                 "streamer_name": "風子"
             }
-        # API 金鑰加載安全通道 (環境變數優先，其次是 config.json)
+        # API 金鑰與模型加載安全通道 (環境變數優先，其次是 config.json)
         self.api_key = os.environ.get("GEMINI_API_KEY") or self.config.get("gemini_api_key", "")
+        self.gemini_model = self.config.get("gemini_model", "gemini-2.5-flash")
 
     def save_config(self):
         config_path = os.path.join(self.base_dir, "player_profile", "config.json")
         self.config["active_project"] = self.active_project
+        self.config["gemini_model"] = self.gemini_model
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(self.config, f, indent=2, ensure_ascii=False)
 
@@ -532,6 +534,8 @@ class GeminiStreamEngine:
                     mime_type="image/jpeg"
                 )
                 contents.append(img_part)
+                # 💡 新增超吸睛畫面對接成功日誌！
+                print(f"{GREEN}{BOLD}[👀 VISION LINK] 成功將螢幕畫面 (480p) 送入 Gemini 聯網大腦！助理正在盯著您的螢幕看囉！{RESET}")
             except Exception as e:
                 print(f"{RED}[IMAGE PACK ERROR] 圖片物件封裝失敗: {e}{RESET}")
             
@@ -544,8 +548,8 @@ class GeminiStreamEngine:
         
         # 4. 調用 Gemini API，要求 Native Audio & Text 回覆！
         try:
-            # 💡 修正點：使用最正統的 2.5 Flash 模型代號
-            target_model = "gemini-2.5-flash"
+            # 💡 修正點：自 config.json 動態載入模型代號，方便隨時切換（如 2.5 Flash 額滿改用 3.5 Flash）
+            target_model = self.gemini_model
             
             # API 呼叫配置：同時要求文字與原生語音輸出 (AUDIO 模態會回傳 WAV 訊號)
             config = types.GenerateContentConfig(
