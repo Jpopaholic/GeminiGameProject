@@ -642,6 +642,12 @@
 
                 // 限制取樣率為 16000Hz 以適應 ASR 模型
                 audioContextEars = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                
+                // 強制恢復 AudioContext 狀態，繞過 OBS 瀏覽器無點擊自動掛起限制
+                if (audioContextEars.state === 'suspended') {
+                    await audioContextEars.resume();
+                }
+                
                 micSourceEars = audioContextEars.createMediaStreamSource(stream);
                 
                 // 單聲道輸入，緩衝區 4096
