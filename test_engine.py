@@ -8,6 +8,13 @@ import sys
 import os
 import asyncio
 
+# Windows console output Unicode compatibility fix
+if sys.platform.startswith('win'):
+    try:
+        sys.stdout.reconfigure(errors='replace')
+    except Exception:
+        pass
+
 # Ensure project root is in path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 

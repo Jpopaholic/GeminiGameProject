@@ -44,13 +44,25 @@ async def main():
     except Exception:
         pass
 
-    # 啟動雙通道背景語音聽覺監聽系統 (Ears)
-    # 將 engine.execute_query 作為語音辨識完成後的 callback 傳入
-    engine.start_dual_ears_listener(engine.execute_query)
+    # 建立非同步使用者輸入佇列
+    user_input_queue = asyncio.Queue()
     
+    # 啟動雙向 WebSocket Live Session 核心
+    live_task = asyncio.create_task(engine.run_live_session(user_input_queue))
+    
+    # 啟動非同步鍵盤讀取任務
+    try:
+        await keyboard_input_loop(engine, user_input_queue)
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        await engine.distill_and_archive_memory()
+    except Exception as e:
+        print(f"\033[91m[CONSOLES ERROR] {e}\033[RESET]")
+
+
+async def keyboard_input_loop(engine, user_input_queue):
+    """非同步非阻塞讀取鍵盤輸入，並送入實時發送佇列"""
     while True:
         try:
-            # 非同步讀取鍵盤終端機輸入 (保留鍵盤操作，作為雙模輸入)
             loop = asyncio.get_event_loop()
             user_input = await loop.run_in_executor(None, lambda: input(f"{BOLD}風子 (或觀眾) >>> {RESET}"))
             
@@ -60,7 +72,7 @@ async def main():
                 
             if user_input.lower() in ["exit", "quit"]:
                 await engine.distill_and_archive_memory()
-                break
+                sys.exit(0)
                 
             elif user_input.lower() == "status":
                 engine.display_status()
@@ -72,14 +84,15 @@ async def main():
                     await engine.switch_project(parts[1])
                 continue
                 
-            # 執行問答/VAD 觸發 (這會自動驅動 OBS 截圖與 Gemini 語音)
-            await engine.execute_query(user_input)
+            # 將輸入發送給 Live Session 佇列處理
+            await user_input_queue.put(user_input)
+            # 給予一點緩衝時間讓回應能完整輸出
+            await asyncio.sleep(0.1)
             
-        except KeyboardInterrupt:
-            await engine.distill_and_archive_memory()
+        except (asyncio.CancelledError, KeyboardInterrupt):
             break
         except Exception as e:
-            print(f"\033[91m[CONSOLES ERROR] {e}\033[RESET]")
+            print(f"\033[91m[KEYBOARD ERROR] {e}\033[RESET]")
 
 
 if __name__ == "__main__":

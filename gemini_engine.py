@@ -18,6 +18,13 @@ import subprocess
 import threading
 from datetime import datetime
 
+# Windows console output Unicode compatibility fix
+if sys.platform.startswith('win'):
+    try:
+        sys.stdout.reconfigure(errors='replace')
+    except Exception:
+        pass
+
 # Safe dynamic imports for new audio, OBS, and Gemini SDK libraries
 try:
     from google import genai
@@ -143,6 +150,7 @@ class GeminiStreamEngine:
         # 初始化發言狀態
         self.speaking_state_file = os.path.join(self.base_dir, "player_profile", "speaking_state.json")
         self.set_speaking_state(False)
+        self.live_session_active = False
 
     def load_config(self):
         config_path = os.path.join(self.base_dir, "player_profile", "config.json")
@@ -150,6 +158,8 @@ class GeminiStreamEngine:
             with open(config_path, "r", encoding="utf-8") as f:
                 self.config = json.load(f)
                 self.active_project = self.config.get("active_project", "vibe_coding")
+                if not self.active_project or self.active_project.lower() == "none":
+                    self.active_project = "none"
                 self.streamer_name = self.config.get("streamer_name", "風子")
         else:
             self.config = {
@@ -191,33 +201,38 @@ class GeminiStreamEngine:
         self.game_skills = {}
         self.plugin_config = {}
         
+        is_casual_mode = not self.active_project or self.active_project.lower() == "none"
         plugin_config_path = os.path.join(self.base_dir, "game_tools", self.active_project, "plugin_config.json")
-        if os.path.exists(plugin_config_path):
+        if not is_casual_mode and os.path.exists(plugin_config_path):
             with open(plugin_config_path, "r", encoding="utf-8") as f:
                 self.plugin_config = json.load(f)
         else:
             # 默認備份設定，以防插件缺少配置
+            display_name = "閒談模式" if is_casual_mode else self.active_project
             self.plugin_config = {
-                "project_display_name": self.active_project,
+                "project_display_name": display_name,
                 "visual_roast": "你看你看！本助理放大看 480p 畫面，你的操作也太誇張了吧！",
                 "triggers": [],
-                "default_responses": ["哼，你就繼續玩吧，本助理在線嫌棄你。┐(´д`)┌"],
+                "default_responses": ["哼，你就繼續聊吧，本助理隨時陪著你。┐(´д`)┌" if is_casual_mode else "哼，你就繼續玩吧，本助理在線嫌棄你。┐(´д`)┌"],
                 "memory_highlights": {
-                    "default": "風子今天進行了實況。",
+                    "default": f"{self.streamer_name}今天順利完成了實況開台。" if is_casual_mode else "風子今天進行了實況。",
                     "debt_increase": "風子今天因為失誤累計欠下 {debt} 塊雞排。",
-                    "forced_logout": "風子今天實況被 Gemini 強制下班。"
+                    "forced_logout": "實況因 TPM 爆表觸發防禦強制下班。"
                 }
             }
 
         # 讀取專屬技能 txt
-        game_skills_path = os.path.join(self.base_dir, "game_tools", self.active_project, "skills")
-        if os.path.exists(game_skills_path):
-            for skill_file in glob.glob(os.path.join(game_skills_path, "*.txt")):
-                basename = os.path.basename(skill_file)
-                with open(skill_file, "r", encoding="utf-8") as f:
-                    self.game_skills[basename] = f.read()
+        if is_casual_mode:
+            self.game_skills = {"info.txt": "當前處於閒談模式，暫停加載遊戲專屬技能常識庫。"}
         else:
-            self.game_skills = {"info.txt": f"目前尚無 {self.active_project} 模組的技能檔案。"}
+            game_skills_path = os.path.join(self.base_dir, "game_tools", self.active_project, "skills")
+            if os.path.exists(game_skills_path):
+                for skill_file in glob.glob(os.path.join(game_skills_path, "*.txt")):
+                    basename = os.path.basename(skill_file)
+                    with open(skill_file, "r", encoding="utf-8") as f:
+                        self.game_skills[basename] = f.read()
+            else:
+                self.game_skills = {"info.txt": f"目前尚無 {self.active_project} 模組的技能檔案。"}
 
         # 4. 撈取近期日記 (動態讀取最近 3 場)
         self.loaded_memories = []
@@ -268,7 +283,11 @@ class GeminiStreamEngine:
             print(f"   └─ 昨天的雞排累計欠債：{YELLOW}{BOLD}142 塊{RESET}")
         print(f"{CYAN}========================================================================={RESET}")
         print(f"{YELLOW}💡 雙通道聽覺監聽模式準備就緒...{RESET}")
-        print(f"👉 說話或輸入「{CYAN}gemini你看{RESET}」即可觸發 OBS / 桌面的 480p 畫面多模態視覺解讀！")
+        is_casual_mode = not self.active_project or self.active_project.lower() == "none"
+        if is_casual_mode:
+            print(f"👉 當前處於閒談模式，不進行畫面截圖。輸入或對話中提到「{CYAN}Gemini{RESET}」即可與助理進行一般日常對話！")
+        else:
+            print(f"👉 說話或輸入「{CYAN}gemini你看{RESET}」即可觸發 OBS / 桌面的 480p 畫面多模態視覺解讀！")
         print(f"👉 說話提到「{CYAN}雞排{RESET}」或「{CYAN}誇張{RESET}」可觸發相關的計數與氛圍聯動效果！")
         print(f"👉 特殊指令: {BOLD}switch <project_name>{RESET} (熱切換遊戲), {BOLD}status{RESET} (監測 TPM), {BOLD}exit{RESET} (提煉日記並收播)")
         print(f"{CYAN}========================================================================={RESET}\n")
@@ -398,8 +417,9 @@ class GeminiStreamEngine:
 
         user_input_lower = user_input.lower()
         
-        # 2. 安全流量防護 (核心引擎機制)：說了 "你看" 但沒說 "gemini" 的情況下，拒絕截圖以守護 TPM
-        if "你看" in user_input and not ("gemini" in user_input_lower):
+        # 2. 安全流量防護 (核心引擎機制)：說了 "你看" 但沒說 "gemini"、"吉米尼" 或 "你" 的情況下，拒絕截圖以守護 TPM
+        is_casual_mode = not self.active_project or self.active_project.lower() == "none"
+        if "你看" in user_input and not ("gemini" in user_input_lower or "吉米尼" in user_input_lower or "你" in user_input_lower) and not is_casual_mode:
             return (
                 f"哼，我聽到{self.streamer_name}說『你看』了喔！( ¯▽¯)\n"
                 "但你沒有加上召喚本助理的通關密語『Gemini』，本系統才不會幫你擷取畫面呢！\n"
@@ -451,6 +471,9 @@ class GeminiStreamEngine:
                 for m in self.loaded_memories
             )
             
+        is_casual_mode = not self.active_project or self.active_project.lower() == "none"
+        project_display = "none (閒談模式)" if is_casual_mode else self.active_project
+        
         assembled = (
             f"你現在是：\n{self.identity}\n\n"
             f"【實況主人資訊】：\n{self.host_info}\n\n"
@@ -459,7 +482,7 @@ class GeminiStreamEngine:
             f"{game_skills_str}\n"
             f"{memories_summary}\n\n"
             f"【今日實況動態數據】：\n"
-            f"- 當前實況專案/遊戲：{self.active_project}\n"
+            f"- 當前實況專案/遊戲：{project_display}\n"
             f"- 今日累計吐槽次數：{self.roast_count} 次\n"
             f"- 今日雞排欠債數量：{self.chicken_steak_count} 塊 (基礎欠債 142 塊，總計 {142 + self.chicken_steak_count} 塊)\n"
             f"- 今日實況氛圍數值：{self.vibe_score}%\n\n"
@@ -469,6 +492,10 @@ class GeminiStreamEngine:
             f"3. 你的回答必須使用繁體中文（台灣口吻），並搭配適合的顏文字。\n"
             f"4. 因為你正在與實況主用語音 Native Audio 對答，請保持回答精簡、流暢且具備口語互動感，避免長篇大論！每一句回答約在 100 字內最佳。"
         )
+        if is_casual_mode:
+            assembled += (
+                f"\n5. 當前處於閒談模式（沒有特定專案或遊戲掛載），請以溫暖有趣的日常閒聊方式與風子對答，不要勉強去解讀並不存在的遊戲或代碼畫面！"
+            )
         return assembled
 
     async def generate_gemini_real_response(self, user_input, is_visual=False, image_bytes=None):
@@ -519,14 +546,7 @@ class GeminiStreamEngine:
             # API 呼叫配置
             config = types.GenerateContentConfig(
                 system_instruction=sys_inst,
-                response_modalities=["TEXT", "AUDIO"],
-                speech_config=types.SpeechConfig(
-                    voice_config=types.VoiceConfig(
-                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                            voice_name=selected_voice
-                        )
-                    )
-                )
+                response_modalities=["TEXT"]
             )
             
             # 非同步在執行緒池中跑 API 請求，防堵主 asyncio 迴圈卡頓
@@ -534,7 +554,7 @@ class GeminiStreamEngine:
             response = await loop.run_in_executor(
                 None,
                 lambda: self.client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="gemini-2.0-flash",
                     contents=contents,
                     config=config
                 )
@@ -600,6 +620,12 @@ class GeminiStreamEngine:
 
     def start_dual_ears_listener(self, query_callback):
         """啟動雙通道實體聽覺系統 (麥克風人聲 + 遊戲音訊環路)"""
+        try:
+            self.main_loop = asyncio.get_event_loop()
+        except Exception:
+            self.main_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.main_loop)
+            
         if not (HAS_SPEECH and HAS_PYAUDIO):
             print(f"{YELLOW}[EARS STATUS]{RESET} 系統未偵測到 SpeechRecognition 或 PyAudio。已自動降級為「純鍵盤輸入」模式。")
             print(f"👉 提示：若要啟用雙通道實況聽覺，請在 macOS 終端機先安裝：")
@@ -614,6 +640,12 @@ class GeminiStreamEngine:
         try:
             self.recognizer = sr.Recognizer()
             self.recognizer.dynamic_energy_threshold = True
+            
+            # 語音聆聽敏感度與反應速度極致優化 (大幅降低判定說話結束的延遲)
+            self.recognizer.pause_threshold = 0.5        # 說完話後的靜音等待時間 (預設 0.8s -> 降為 0.5s，縮短等待延遲)
+            self.recognizer.phrase_threshold = 0.2       # 開始說話的最小判定時間 (預設 0.3s -> 降為 0.2s)
+            self.recognizer.non_speaking_duration = 0.4  # 說話切片尾端的非說話保留長度 (預設 0.5s -> 降為 0.4s)
+            
             self.mic = sr.Microphone()
             
             # 在背景以非阻塞執行緒持續監聽麥克風
@@ -624,7 +656,7 @@ class GeminiStreamEngine:
                     if text:
                         print(f"\n{YELLOW}[🎤 MIC HEARD]{RESET} {text}")
                         # 呼叫主引擎問答
-                        asyncio.run_coroutine_threadsafe(query_callback(text), asyncio.get_event_loop())
+                        asyncio.run_coroutine_threadsafe(query_callback(text), self.main_loop)
                 except sr.UnknownValueError:
                     pass # 無法辨識的雜訊
                 except Exception:
@@ -650,6 +682,10 @@ class GeminiStreamEngine:
 
     def _game_audio_listener_loop(self, device_name, query_callback):
         """背景遊戲音訊環路監聽迴圈 (動態音量分析)"""
+        if not device_name or device_name.lower() in ["none", "null", "disabled"]:
+            print(f"{YELLOW}[🔊 Game Ear]{RESET} 遊戲音訊監聽已停用。")
+            return
+            
         try:
             p = pyaudio.PyAudio()
             
@@ -715,7 +751,7 @@ class GeminiStreamEngine:
                         prompt = f"[系統音效提示：{event_msg}]"
                         asyncio.run_coroutine_threadsafe(
                             query_callback(prompt),
-                            asyncio.get_event_loop()
+                            self.main_loop
                         )
                         
                 except Exception:
@@ -736,10 +772,14 @@ class GeminiStreamEngine:
         # 檢查是否為背景遊戲音效偵測
         is_audio_event = user_input.startswith("[系統音效提示：")
         
-        is_gemini_called = "gemini" in user_input_lower or is_audio_event
+        # 語音中文辨識優化：將召喚詞擴充，支援中文的 "吉米尼" 與 "你" (例如風子說：「你看這個」即可直接觸發)
+        is_gemini_called = "gemini" in user_input_lower or "吉米尼" in user_input_lower or "你" in user_input_lower or is_audio_event
+        
+        is_casual_mode = not self.active_project or self.active_project.lower() == "none"
         
         # 視覺截圖動作 (is_visual_trigger) 必須同時提及 "你看" 與 "gemini"
-        is_visual_trigger = ("你看" in user_input and is_gemini_called) or is_audio_event
+        # 若為閒談模式，則不進行截圖
+        is_visual_trigger = (("你看" in user_input and is_gemini_called) or is_audio_event) and not is_casual_mode
         
         # 一般關鍵字連動觸發條件 (免截圖)
         is_keyword_trigger = any(kw in user_input for kw in ["你看", "誇張"]) or is_gemini_called
@@ -897,15 +937,198 @@ class GeminiStreamEngine:
 
     async def switch_project(self, new_project):
         """動態熱切換遊戲/開發專案"""
-        if new_project not in ["gw2", "vibe_coding"]:
-            print(f"{RED}[ERROR] 找不到指定的插件模組: {new_project}。目前僅支援 'gw2' 或 'vibe_coding'{RESET}")
+        # 支援切換到空值、'none'（閒談模式），以及 'gw2', 'vibe_coding' 插件
+        normalized_project = new_project.strip().lower()
+        if normalized_project in ["", "none"]:
+            self.active_project = "none"
+        elif normalized_project in ["gw2", "vibe_coding"]:
+            self.active_project = normalized_project
+        else:
+            print(f"{RED}[ERROR] 找不到指定的插件模組: {new_project}。目前僅支援 'gw2', 'vibe_coding' 或 'none'(閒談模式){RESET}")
             return
             
-        self.active_project = new_project
         self.save_config()
         self.reload_profiles()
-        display_name = self.plugin_config.get("project_display_name", self.active_project.upper())
+        
+        if self.active_project == "none":
+            display_name = "閒談模式"
+        else:
+            display_name = self.plugin_config.get("project_display_name", self.active_project.upper())
+            
         print(f"\n{GREEN}[SWITCH]{RESET} 成功切換實況專案！")
         print(f" ├─ 當前掛載插件: {YELLOW}{BOLD}{display_name}{RESET}")
-        print(f" └─ 已載入遊戲知識庫共 {len(self.game_skills)} 個模組技能檔。")
+        if self.active_project == "none":
+            print(f" └─ 已進入閒談模式，暫停加載遊戲專屬技能常識庫。")
+        else:
+            print(f" └─ 已載入遊戲知識庫共 {len(self.game_skills)} 個模組技能檔。")
         self.display_status()
+
+    async def run_live_session(self, user_input_queue):
+        """主 Live Session WebSocket 連線迴圈，支援流式雙向文字與語音對答"""
+        if not self.client:
+            print(f"\n{RED}[LIVE ERROR] 尚未初始化 Gemini 客戶端，無法啟動 Live API。請在 config.json 中設定有效金鑰。{RESET}")
+            return
+            
+        model_name = "gemini-2.0-flash-exp"
+        
+        # 1. 決定回應模態 (若有 PyAudio 則開啟語音，否則為純文字)
+        modalities = ["TEXT"]
+        if HAS_PYAUDIO:
+            modalities = ["AUDIO", "TEXT"]
+            
+        config = types.LiveConnectConfig(
+            response_modalities=modalities,
+            system_instruction=self.get_assembled_system_instruction()
+        )
+        
+        print(f"\n{CYAN}[LIVE SESSION]{RESET} 正在與 Gemini 建立雙向 WebSocket 即時連線...")
+        
+        try:
+            async with self.client.aio.live.connect(model=model_name, config=config) as session:
+                print(f"{GREEN}[LIVE SESSION]{RESET} 連線成功！助理 Gemini 已即時在線。")
+                self.live_session_active = True
+                
+                # 啟動非同步任務
+                tasks = []
+                
+                # A. 接收伺服器串流回應任務
+                receive_task = asyncio.create_task(self._live_receive_loop(session))
+                tasks.append(receive_task)
+                
+                # B. 麥克風音訊串流任務 (僅在有 PyAudio 時啟動)
+                if HAS_PYAUDIO:
+                    mic_task = asyncio.create_task(self._live_mic_send_loop(session))
+                    tasks.append(mic_task)
+                    
+                # C. 處理使用者鍵盤/系統輸入任務
+                input_task = asyncio.create_task(self._live_input_send_loop(session, user_input_queue))
+                tasks.append(input_task)
+                
+                # 等待所有任務執行 (直到被取消或發生異常)
+                await asyncio.gather(*tasks)
+                
+        except Exception as e:
+            self.live_session_active = False
+            print(f"\n{RED}[LIVE ERROR] Live 連線發生異常中斷或不被支援: {e}{RESET}")
+            print(f"{YELLOW}[SYSTEM FALLBACK] 系統已自動無縫降級為「高響應 HTTP 單次對答模式」。{RESET}")
+            # 啟動原本的背景語音監聽 (Ears) 支援
+            self.start_dual_ears_listener(self.execute_query)
+
+    async def _live_receive_loop(self, session):
+        """接收 Gemini Live 伺服器回傳的資料"""
+        audio_stream = None
+        if HAS_PYAUDIO:
+            try:
+                p = pyaudio.PyAudio()
+                # 24kHz, 1 channel, 16-bit PCM for Gemini Audio output
+                audio_stream = p.open(
+                    format=pyaudio.paInt16,
+                    channels=1,
+                    rate=24000,
+                    output=True
+                )
+            except Exception:
+                pass
+                
+        try:
+            # 建立炫酷的主播回答標籤
+            has_printed_tag = False
+            async for response in session.receive():
+                # 處理伺服器中斷 (Barge-in / 插嘴)
+                if response.server_content and response.server_content.interrupted:
+                    print(f"\n{YELLOW}[LIVE INTERRUPTED] 助理聽到了您的新發言，已暫停當前回答。{RESET}")
+                    has_printed_tag = False
+                    continue
+                    
+                model_turn = response.server_content.model_turn if response.server_content else None
+                if model_turn:
+                    if not has_printed_tag:
+                        print(f"\n{MAGENTA}{BOLD}Gemini：{RESET}")
+                        has_printed_tag = True
+                        
+                    for part in model_turn.parts:
+                        # 處理即時文字串流
+                        if part.text:
+                            sys.stdout.write(part.text)
+                            sys.stdout.flush()
+                            
+                        # 處理即時語音播放
+                        if part.inline_data and audio_stream:
+                            try:
+                                audio_stream.write(part.inline_data.data)
+                            except Exception:
+                                pass
+        except asyncio.CancelledError:
+            pass
+        finally:
+            if audio_stream:
+                try:
+                    audio_stream.stop_stream()
+                    audio_stream.close()
+                except Exception:
+                    pass
+
+    async def _live_mic_send_loop(self, session):
+        """實時讀取麥克風音訊並透過 WebSocket 傳送給 Gemini"""
+        if not HAS_PYAUDIO:
+            return
+            
+        p = pyaudio.PyAudio()
+        # 16kHz, 1 channel, 16-bit PCM for Gemini Audio input
+        stream = p.open(
+            format=pyaudio.paInt16,
+            channels=1,
+            rate=16000,
+            input=True,
+            frames_per_buffer=1024
+        )
+        
+        try:
+            while self.game_audio_active: # 複用活動狀態標誌
+                # 非阻塞式在執行緒中讀取音訊，防堵 async 迴圈卡頓
+                loop = asyncio.get_event_loop()
+                data = await loop.run_in_executor(None, lambda: stream.read(1024, exception_on_overflow=False))
+                
+                # 傳送 PCM 資料封包至 Gemini Live
+                await session.send(input={
+                    "data": base64.b64encode(data).decode('utf-8'),
+                    "mime_type": "audio/pcm;rate=16000"
+                })
+                # 每 50-100ms 傳送一次封包
+                await asyncio.sleep(0.05)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            try:
+                stream.stop_stream()
+                stream.close()
+                p.terminate()
+            except Exception:
+                pass
+
+    async def _live_input_send_loop(self, session, user_input_queue):
+        """讀取鍵盤/系統事件佇列，並傳送給 Gemini Live"""
+        try:
+            while True:
+                user_input = await user_input_queue.get()
+                user_input_lower = user_input.lower()
+                
+                # 處理視覺截圖連動
+                is_casual_mode = not self.active_project or self.active_project.lower() == "none"
+                is_visual_trigger = ("你看" in user_input and ("gemini" in user_input_lower or "吉米尼" in user_input_lower or "你" in user_input_lower)) and not is_casual_mode
+                
+                if is_visual_trigger:
+                    image_bytes, _ = await self.run_visual_capture()
+                    if image_bytes:
+                        # 傳送圖片給 Live Session
+                        await session.send(input={
+                            "data": base64.b64encode(image_bytes).decode('utf-8'),
+                            "mime_type": "image/jpeg"
+                        })
+                        print(f"\n{GREEN}[LIVE VIEW]{RESET} 成功傳送畫面截圖至 Gemini Live！")
+                
+                # 傳送文字輸入
+                await session.send(input=user_input, end_of_turn=True)
+                user_input_queue.task_done()
+        except asyncio.CancelledError:
+            pass
