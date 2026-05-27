@@ -634,8 +634,9 @@ class GeminiStreamEngine:
                 self.speak_tts(warning_msg)
                 # 非同步等待以讓語音播放
                 await asyncio.sleep(4.0)
-                self.set_speaking_state(False)
-                self.is_quota_warning = False
+                
+                # 提前回傳 None, None 阻斷後續的 fallback 播音流程
+                return None, None
             else:
                 print(f"\n{RED}[GEMINI API ERROR] API 呼叫失敗: {e}。自動防護降級為本地模擬...{RESET}")
             return self.generate_gemini_response(user_input, is_visual=is_visual), None
@@ -924,6 +925,9 @@ class GeminiStreamEngine:
                     image_bytes=image_bytes,
                     capture_method=capture_method
                 )
+                if ai_response is None:
+                    # 額度耗盡已由異常模組處理，提前阻斷退出，不再進行後續對話/語音
+                    return
             else:
                 # 降級至本地模擬
                 ai_response = self.generate_gemini_response(user_input, is_visual=is_visual_trigger)
@@ -1015,6 +1019,7 @@ class GeminiStreamEngine:
         finally:
             # 確保不論執行成功或遭遇任何 API 超載異常，皆徹底解鎖並清空聽訊緩衝區！
             self.set_speaking_state(False)
+            self.is_quota_warning = False
             if hasattr(self, 'pcm_buffer'):
                 self.pcm_buffer.clear()
         
