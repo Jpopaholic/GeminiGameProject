@@ -1075,16 +1075,30 @@ class GeminiStreamEngine:
         print(f"{MAGENTA}{BOLD}吉米尼實況助理溫馨下班啦！辛苦風子了，下次實況我們再見囉！(〃∀〃){RESET}\n")
 
     async def switch_project(self, new_project):
-        """動態熱切換遊戲/開發專案"""
-        # 支援切換到空值、'none'（閒談模式），以及 'gw2', 'vibe_coding' 插件
+        """動態熱切換遊戲/開發專案（自動掃描 game_tools/ 下的所有插件資料夾）"""
         normalized_project = new_project.strip().lower()
+        
         if normalized_project in ["", "none"]:
             self.active_project = "none"
-        elif normalized_project in ["gw2", "vibe_coding"]:
-            self.active_project = normalized_project
         else:
-            print(f"{RED}[ERROR] 找不到指定的插件模組: {new_project}。目前僅支援 'gw2', 'vibe_coding' 或 'none'(閒談模式){RESET}")
-            return
+            # 動態掃描 game_tools/ 目錄，取得所有合法的插件資料夾名稱
+            game_tools_path = os.path.join(self.base_dir, "game_tools")
+            available_plugins = [
+                d for d in os.listdir(game_tools_path)
+                if os.path.isdir(os.path.join(game_tools_path, d))
+            ] if os.path.exists(game_tools_path) else []
+            
+            if normalized_project in [p.lower() for p in available_plugins]:
+                # 以實際資料夾名稱為準（保留大小寫）
+                self.active_project = next(
+                    p for p in available_plugins if p.lower() == normalized_project
+                )
+            else:
+                available_str = ", ".join(f"'{p}'" for p in available_plugins) or "（無）"
+                print(f"{RED}[ERROR] 找不到插件模組: '{new_project}'。"
+                      f"目前 game_tools/ 中可用的插件為: {available_str}，或輸入 'none'（閒談模式）{RESET}")
+                return
+
             
         self.save_config()
         self.reload_profiles()

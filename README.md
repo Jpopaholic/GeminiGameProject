@@ -263,8 +263,8 @@ mkdir game_tools/minecraft/skills
 switch minecraft
 ```
 
-> [!NOTE]
-> 引擎目前硬編碼支援 `gw2`、`vibe_coding` 與 `none`（閒談模式）的切換指令驗證。若要新增其他遊戲，需同步修改 `gemini_engine.py` 中 `switch_project()` 函式的白名單列表。
+> [!TIP]
+> 引擎會自動掃描 `game_tools/` 資料夾下的所有子目錄作為合法插件清單，**新增遊戲資料夾後不需要修改任何程式碼**，直接執行 `switch` 指令即可！若輸入了不存在的名稱，錯誤訊息會自動列出當前所有可用的插件。
 
 ---
 
