@@ -873,8 +873,12 @@ class GeminiStreamEngine:
 
     async def execute_query(self, user_input):
         """執行一輪語音/聊天室互動，並實施 TPM 限額防禦"""
-        # 1. 偵測 VAD 關鍵字與 Gemini 呼喚
         user_input_lower = user_input.lower()
+        # 安全雙重防禦鎖：若助理正在發言，且非管理控制指令，直接忽略該次對話請求（防爆音防併發）
+        if getattr(self, 'is_speaking', False) and user_input_lower not in ["exit", "quit", "status"] and not user_input_lower.startswith("switch "):
+            return
+            
+        # 1. 偵測 VAD 關鍵字與 Gemini 呼喚
         
         # 檢查是否為背景遊戲音效偵測
         is_audio_event = user_input.startswith("[系統音效提示：")

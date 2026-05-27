@@ -101,6 +101,11 @@ async def keyboard_input_loop(engine, user_input_queue):
             if not user_input:
                 continue
                 
+            # 當助理正在發言（且非管理控制指令），鎖定鍵盤對答輸入以確保使用者體驗
+            if getattr(engine, 'is_speaking', False) and user_input.lower() not in ["exit", "quit", "status"] and not user_input.lower().startswith("switch "):
+                print(f"\n{YELLOW}[⚠️ 助理發言中] Gemini 正在回答中，輸入已鎖定。請等她說完再發問喔！{RESET}")
+                continue
+                
             # pyrefly: ignore [parse-error]
             if user_input.lower() in ["exit", "quit"]:
                 await engine.distill_and_archive_memory()
