@@ -296,7 +296,7 @@ class GeminiStreamEngine:
         
         # 顯示 API Key 加載與客戶端狀態
         if self.client:
-            print(f"{BOLD} 【雲端語音大腦】{RESET} {GREEN}連線成功 (真實 Gemini 2.5 Flash Native Audio | Voice: {self.config.get('gemini_voice', 'Aoede')}){RESET}")
+            print(f"{BOLD} 【雲端語音大腦】{RESET} {GREEN}連線成功 (真實 Gemini API | 模型: {self.gemini_model}){RESET}")
         else:
             print(f"{BOLD} 【雲端語音大腦】{RESET} {RED}未加載 (使用「本地模擬引擎」。請在 config.json 填入有效的 gemini_api_key){RESET}")
             
@@ -583,30 +583,12 @@ class GeminiStreamEngine:
             # 💡 修正點：自 config.json 動態載入模型代號，方便隨時切換（如 2.5 Flash 額滿改用 3.5 Flash）
             target_model = self.gemini_model
             
-            # 取得指定語音角色 (config.json 的 gemini_voice 欄位，預設 Aoede)
-            voice_name = self.config.get("gemini_voice", "Aoede")
-            
-            # API 呼叫配置：同時要求文字與原生語音輸出 (AUDIO 模態會回傳 WAV 訊號)
-            # 💡 解鎖端到端原生語音大腦：啟用 AUDIO + TEXT 雙模態，並設定指定語音角色
-            try:
-                speech_cfg = types.SpeechConfig(
-                    voice_config=types.VoiceConfig(
-                        prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice_name)
-                    )
-                )
-                config = types.GenerateContentConfig(
-                    system_instruction=sys_inst,
-                    response_modalities=["AUDIO", "TEXT"],
-                    speech_config=speech_cfg,
-                    temperature=0.7
-                )
-            except Exception:
-                # 若 SDK 版本不支援 SpeechConfig，退回純文字模式
-                config = types.GenerateContentConfig(
-                    system_instruction=sys_inst,
-                    response_modalities=["TEXT"],
-                    temperature=0.7
-                )
+            # API 呼叫配置：純文字模式 (TTS 由本地 speak_tts 負責)
+            config = types.GenerateContentConfig(
+                system_instruction=sys_inst,
+                response_modalities=["TEXT"],
+                temperature=0.7
+            )
             
             # 非同步在執行緒池中跑 API 請求，防堵主 asyncio 迴圈卡頓
             loop = asyncio.get_event_loop()

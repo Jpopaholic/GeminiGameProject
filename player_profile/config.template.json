@@ -12,6 +12,5 @@
   "tpm_warning_threshold": 850000,
   "streamer_name": "風子",
   "gemini_api_key": "YOUR_GEMINI_API_KEY_HERE",
-  "gemini_voice": "Aoede",
   "gemini_model": "gemini-2.5-flash"
 }

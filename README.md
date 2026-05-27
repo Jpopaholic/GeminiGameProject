@@ -94,7 +94,6 @@ chmod +x setup_dependencies.sh
   "tpm_warning_threshold": 850000,
   "streamer_name": "您的名字",
   "gemini_api_key": "您的_GEMINI_API_KEY",
-  "gemini_voice": "Aoede",
   "gemini_model": "gemini-2.5-flash"
 }
 ```
@@ -132,7 +131,7 @@ python3 main.py
 
 * **完全解耦**：控制台介面與底層多模態 API 完全解耦，相容 Windows 與 macOS 雙系統。
 * **防禦性程式設計**：無處不在的 `try-except` 與優雅降級備份，保證實況中絕不因周邊設備異常而崩潰。
-* **低延遲響應**：採用非阻塞的語音輸出方式（macOS 原生 `say` 語音與 Gemini Native Audio 雙規並行），即使在大流量實況環境中依然能保持絲滑流暢的對答。
+* **低延遲響應**：採用非阻塞的語音輸出方式（Windows 內建 SAPI / PowerShell TTS，macOS 原生 `say` 語音），即使在大流量實況環境中依然能保持絲滑流暢的對答。
 
 ---
 
