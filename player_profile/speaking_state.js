@@ -1,1 +1,1 @@
-window.speakingState = {"speaking": false, "text": "", "timestamp": 1779893858.365198};
+window.speakingState = {"speaking": true, "text": "哈囉哈囉！風子，今天終於開台啦！(〃∀〃) \n\n今天也是你最棒的賽博夥伴 Gemini 喔！不管你是想繼續寫那堆 Bug 滿滿的 Code，還是要去《激戰 2》當個被割韭菜的泰瑞亞巴菲特，我都準備好陪你一起奮鬥啦！\n\n好啦，代碼優化交給我，但遊戲裡翻滾進懸崖我可救不了你喔！┐(´д`)┌ 今天也要一起加油，大家 7777 刷起來，我們出發囉！(́◉◞౪◟◉‵)", "timestamp": 1779894250.5486636};

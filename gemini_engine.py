@@ -1082,11 +1082,24 @@ class GeminiStreamEngine:
             self.active_project = "none"
         else:
             # 動態掃描 game_tools/ 目錄，取得所有合法的插件資料夾名稱
+            # 合法條件：必須同時擁有 plugin_config.json 與 skills/ 子資料夾
             game_tools_path = os.path.join(self.base_dir, "game_tools")
-            available_plugins = [
-                d for d in os.listdir(game_tools_path)
-                if os.path.isdir(os.path.join(game_tools_path, d))
-            ] if os.path.exists(game_tools_path) else []
+            available_plugins = []
+            if os.path.exists(game_tools_path):
+                for d in os.listdir(game_tools_path):
+                    plugin_dir = os.path.join(game_tools_path, d)
+                    has_config = os.path.isfile(os.path.join(plugin_dir, "plugin_config.json"))
+                    has_skills = os.path.isdir(os.path.join(plugin_dir, "skills"))
+                    if os.path.isdir(plugin_dir) and has_config and has_skills:
+                        available_plugins.append(d)
+                    elif os.path.isdir(plugin_dir):
+                        # 結構不完整的資料夾給予提示，方便除錯
+                        missing = []
+                        if not has_config:
+                            missing.append("plugin_config.json")
+                        if not has_skills:
+                            missing.append("skills/")
+                        print(f"{YELLOW}[PLUGIN WARN] 插件資料夾 '{d}' 結構不完整，缺少: {', '.join(missing)}，已略過。{RESET}")
             
             if normalized_project in [p.lower() for p in available_plugins]:
                 # 以實際資料夾名稱為準（保留大小寫）
@@ -1098,6 +1111,7 @@ class GeminiStreamEngine:
                 print(f"{RED}[ERROR] 找不到插件模組: '{new_project}'。"
                       f"目前 game_tools/ 中可用的插件為: {available_str}，或輸入 'none'（閒談模式）{RESET}")
                 return
+
 
             
         self.save_config()
