@@ -331,15 +331,16 @@ class GeminiStreamEngine:
                     scene_resp = client.get_current_program_scene()
                     source_name = scene_resp.current_program_scene_name
                 
-                # 執行 480p 賽博降維壓制 (在 OBS 端完成縮放，極省頻寬與效能！)
-                screenshot_resp = client.get_source_screenshot(
-                    source_name=source_name,
-                    image_format="jpeg",
-                    image_width=854,
-                    image_height=480
+                # 執行 480p 賽博降維壓制 (採用 client.send 通用方法，100% 繞過 obsws-python 自定義套件參數封裝 bug)
+                screenshot_resp = client.send(
+                    "GetSourceScreenshot",
+                    {
+                        "sourceName": source_name,
+                        "imageFormat": "jpeg",
+                        "imageWidth": 854,
+                        "imageHeight": 480
+                    }
                 )
-                
-                # 解碼 base64 uri 得到 bytes
                 image_data_uri = screenshot_resp.image_data_uri
                 if "," in image_data_uri:
                     base64_data = image_data_uri.split(",")[1]
