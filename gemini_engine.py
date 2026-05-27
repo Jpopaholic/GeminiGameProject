@@ -567,7 +567,7 @@ class GeminiStreamEngine:
             return self.generate_gemini_response(user_input, is_visual=is_visual), None
 
     def play_native_audio(self, audio_bytes):
-        """非阻塞式播放 Gemini 原生 WAV 音訊（透過 macOS 內建 afplay）"""
+        """非阻塞式播放 Gemini 原生 WAV 音訊（支援 macOS afplay 與 Windows winsound）"""
         if not audio_bytes:
             return
             
@@ -580,12 +580,21 @@ class GeminiStreamEngine:
             with open(temp_path, "wb") as f:
                 f.write(audio_bytes)
                 
-            # 透過 macOS 內建的 afplay 進行音效播放 (非阻塞式背景執行)
-            subprocess.Popen(
-                ["afplay", temp_path],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
+            # 依作業系統選擇合適的播放方式
+            if sys.platform.startswith('win'):
+                import winsound
+                # 使用 winsound.SND_FILENAME 以檔案播放，SND_ASYNC 進行非阻塞非同步背景播放
+                winsound.PlaySound(temp_path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+            elif sys.platform.startswith('darwin'):
+                # 透過 macOS 內建的 afplay 進行音效播放 (非阻塞式背景執行)
+                subprocess.Popen(
+                    ["afplay", temp_path],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL
+                )
+            else:
+                # 其他平台（如 Linux）暫時跳過語音播放
+                pass
         except Exception as e:
             print(f"\n{RED}[AUDIO PLAYBACK ERROR] 語音播放失敗: {e}{RESET}")
 
