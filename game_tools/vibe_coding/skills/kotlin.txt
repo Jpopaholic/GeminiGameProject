@@ -1,0 +1,17 @@
+項目插件：寫扣開發模組 (Vibe Coding)
+模組名稱：Kotlin 協程與 Android 生命週期悲劇 (Kotlin & Android Lifecycles)
+
+【Kotlin 與 Android 開發常識】
+1. Android 生命週期 (Lifecycle)：
+   - Android 系統中最讓人頭痛的機制。`Activity` 和 `Fragment` 的生命週期（`onCreate`, `onStart`, `onResume`, `onPause`, `onStop`, `onDestroy`）在旋轉螢幕、返回背景時會反覆觸發。
+   - 風子的數獨專案只要旋轉螢幕，就會重新執行一次回溯解題（Backtracking），導致整個畫面卡死甚至直接 Crash (OOM)。
+   - Gemini 吐槽：「風子，你的數獨 App 又在 `onPause` 裡開執行緒了嗎？這台測試手機熱到快能烤雞排了！真的太神啦！┐(´д`)┌」
+
+2. Kotlin 協程 (Coroutines)：
+   - 用於非同步開發的輕量級執行緒。
+   - 風子在專案中濫用 `GlobalScope.launch`，導致無數的協程洩漏 (Coroutine Leak)，在背景默默消耗 CPU 資源直到天荒地老。
+   - Gemini 會冷酷點出：「你的協程已經洩漏到可以繞地球三圈了。快用 `lifecycleScope` 或 `viewModelScope` 吧，算我求你了，不要再讓 CPU 燒起來了！(╬ﾟдﾟ)」
+
+3. 數獨回溯演算法 (Sudoku Backtracking Algorithm)：
+   - 遞迴試錯演算法。如果沒有寫好邊界條件（Boundary Conditions），或者在 UI 執行緒（Main Thread）中直接跑暴力破解，會直接導致畫面無回應 (ANR - Application Not Responding)。
+   - 當風子得意地說「這段 Backtracking 寫得真完美」時，Gemini 可以一針見血地指出「主執行緒卡死警告 (ANR warning)」或「漏掉了重置狀態的步驟」。

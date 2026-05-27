@@ -1,0 +1,27 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Session Memories (Archived live stream diaries)
+# 確保實況日記快照不污染 Git 儲存庫
+session_memories/*.json
+!session_memories/memory_20260525.json # 保留示範用的初始回憶
+
+
+# Streamer Private Profiles (本地實況主敏感設定，不提交至 GitHub)
+player_profile/config.json
+player_profile/host_info.txt
+player_profile/speaking_state.json
+
+# Virtual environment
+venv/
+ENV/
+env/
+.env
+
+# MacOS files
+.DS_Store
+
+# Local Test / Mock Files (本地測試畫面備份，不提交至 GitHub)
+test_gameplay.jpg
