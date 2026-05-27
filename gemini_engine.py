@@ -324,13 +324,16 @@ class GeminiStreamEngine:
                 # OBS v5 ReqClient 建立連線
                 client = obs.ReqClient(host=host, port=port, password=password, timeout=3)
                 
-                # 取得當前 OBS Program 場景
-                scene_resp = client.get_current_program_scene()
-                scene_name = scene_resp.current_program_scene_name
+                # 優先取得設定中的特定圖層/來源名稱，無則使用當前 Program 場景（整場畫面）
+                source_name = obs_config.get("source_name", "").strip()
+                if not source_name:
+                    # 取得當前 OBS Program 場景
+                    scene_resp = client.get_current_program_scene()
+                    source_name = scene_resp.current_program_scene_name
                 
                 # 執行 480p 賽博降維壓制 (在 OBS 端完成縮放，極省頻寬與效能！)
                 screenshot_resp = client.get_source_screenshot(
-                    source_name=scene_name,
+                    source_name=source_name,
                     image_format="jpeg",
                     image_width=854,
                     image_height=480
@@ -345,7 +348,7 @@ class GeminiStreamEngine:
                     
                 image_bytes = base64.b64decode(base64_data)
                 capture_method = "OBS_WEBSOCKET"
-                print(f"{GREEN}[OBS WebSocket]{RESET} 成功擷取場景 {scene_name}！取得 854x480 JPEG 畫面 ({len(image_bytes)/1024:.1f} KB)")
+                print(f"{GREEN}[OBS WebSocket]{RESET} 成功擷取來源/圖層「{source_name}」！取得 854x480 JPEG 畫面 ({len(image_bytes)/1024:.1f} KB)")
                 
             except Exception as e:
                 print(f"{RED}[OBS ERROR] OBS WebSocket 擷取失敗: {e}。啟動降級方案...{RESET}")
