@@ -341,7 +341,12 @@ class GeminiStreamEngine:
                         "imageHeight": 480
                     }
                 )
-                image_bytes = base64.b64decode(screenshot_resp.image_data)
+                raw_data = screenshot_resp.image_data
+                if "," in raw_data:
+                    base64_data = raw_data.split(",")[1]
+                else:
+                    base64_data = raw_data
+                image_bytes = base64.b64decode(base64_data)
                 capture_method = "OBS_WEBSOCKET"
                 print(f"{GREEN}[OBS WebSocket]{RESET} 成功擷取來源/圖層「{source_name}」！取得 854x480 JPEG 畫面 ({len(image_bytes)/1024:.1f} KB)")
                 
