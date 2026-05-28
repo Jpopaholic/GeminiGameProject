@@ -70,7 +70,6 @@
 ├── stream_overlay/
 │   └── index.html             # OBS 實況發光 Logo 掛件 (整合粒子與磨砂字幕框)
 └── game_tools/                # 專案情境專屬技能庫 (此目錄下的子資料夾均已被 Git 忽略，保護實況主隱私與配置)
-    └── README.md              # 說明文件與插件規格指南
 ```
 
 ---
