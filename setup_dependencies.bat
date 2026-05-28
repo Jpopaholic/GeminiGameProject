@@ -8,8 +8,8 @@ echo [1/3] Upgrading pip...
 python -m pip install --user --upgrade pip
 
 :: 2. Install base requirements
-echo [2/3] Installing core libraries (Gemini SDK, Pillow, OBS WebSocket, MSS, ASR (Whisper), TTS, WebSockets)...
-python -m pip install --user google-genai obsws-python pillow mss faster-whisper edge-tts websockets
+echo [2/3] Installing core libraries (Gemini SDK, Pillow, OBS WebSocket, MSS, ASR (Whisper), TTS, WebSockets, SoundDevice)...
+python -m pip install --user google-genai obsws-python pillow mss faster-whisper edge-tts websockets sounddevice
 
 :: 3. Try to install pyaudio
 echo [3/3] Trying to install pyaudio (microphone capture support)...
@@ -20,9 +20,9 @@ python -c "import pyaudio" 2>nul
 if %errorlevel% equ 0 (
     echo SUCCESS: PyAudio installed successfully!
 ) else (
-    echo WARNING: PyAudio failed to install.
-    echo Note: PyAudio compilation failed on Windows due to missing portaudio headers.
-    echo This is NORMAL. The stream engine will gracefully downgrade to keyboard mode.
+    echo WARNING: PyAudio failed to compile on Windows (normal for this Python version).
+    echo NO WORRIES! The engine has installed sounddevice as a robust, pre-compiled fallback.
+    echo Your offline microphone side-hearing will still work perfectly!
 )
 
 echo =========================================================================

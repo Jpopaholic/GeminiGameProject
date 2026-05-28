@@ -29,6 +29,7 @@ if sys.platform.startswith('win'):
 try:
     from google import genai
     from google.genai import types
+    from google.genai.types import GenerateContentConfig, LiveConnectConfig, Part, Content
     HAS_GEMINI_SDK = True
 except ImportError:
     HAS_GEMINI_SDK = False
@@ -62,6 +63,109 @@ try:
     HAS_PYAUDIO = True
 except ImportError:
     HAS_PYAUDIO = False
+
+# Fallback: Emulate PyAudio using sounddevice if PyAudio is absent but sounddevice is installed
+if not HAS_PYAUDIO:
+    try:
+        import sounddevice as sd
+        import sys
+        from types import ModuleType as StdModuleType
+
+        class SoundDeviceStream:
+            def __init__(self, **kwargs):
+                self.rate = kwargs.get('rate', 16000)
+                self.channels = kwargs.get('channels', 1)
+                self.input = kwargs.get('input', False)
+                self.output = kwargs.get('output', False)
+                self.device_index = kwargs.get('input_device_index', kwargs.get('output_device_index', None))
+                self.blocksize = kwargs.get('frames_per_buffer', 1024)
+                
+                if self.input and self.output:
+                    self.sd_stream = sd.RawStream(
+                        samplerate=self.rate,
+                        channels=self.channels,
+                        dtype='int16',
+                        device=self.device_index,
+                        blocksize=self.blocksize
+                    )
+                elif self.input:
+                    self.sd_stream = sd.RawInputStream(
+                        samplerate=self.rate,
+                        channels=self.channels,
+                        dtype='int16',
+                        device=self.device_index,
+                        blocksize=self.blocksize
+                    )
+                elif self.output:
+                    self.sd_stream = sd.RawOutputStream(
+                        samplerate=self.rate,
+                        channels=self.channels,
+                        dtype='int16',
+                        device=self.device_index,
+                        blocksize=self.blocksize
+                    )
+                else:
+                    self.sd_stream = None
+                    
+                if self.sd_stream:
+                    self.sd_stream.start()
+
+            def read(self, num_frames, exception_on_overflow=False):
+                if self.sd_stream:
+                    data, overflowed = self.sd_stream.read(num_frames)
+                    return bytes(data)
+                return b""
+
+            def write(self, data):
+                if self.sd_stream:
+                    self.sd_stream.write(data)
+
+            def stop_stream(self):
+                if self.sd_stream:
+                    self.sd_stream.stop()
+
+            def close(self):
+                if self.sd_stream:
+                    self.sd_stream.close()
+
+        class SoundDevicePyAudioEmulation:
+            paInt16 = 8
+
+            def __init__(self):
+                pass
+
+            def get_device_count(self):
+                return len(sd.query_devices())
+
+            def get_device_info_by_index(self, index):
+                try:
+                    sd_info = sd.query_devices(index)
+                    return {
+                        "name": sd_info.get("name", "Unknown"),
+                        "maxInputChannels": sd_info.get("max_input_channels", 0),
+                        "maxOutputChannels": sd_info.get("max_output_channels", 0),
+                        "defaultSampleRate": sd_info.get("default_samplerate", 44100),
+                    }
+                except Exception:
+                    return {}
+
+            def open(self, **kwargs):
+                return SoundDeviceStream(**kwargs)
+
+            def terminate(self):
+                pass
+
+        pyaudio_mock = StdModuleType("pyaudio")
+        pyaudio_mock.PyAudio = SoundDevicePyAudioEmulation
+        pyaudio_mock.paInt16 = SoundDevicePyAudioEmulation.paInt16
+        sys.modules["pyaudio"] = pyaudio_mock
+        HAS_PYAUDIO = True
+    except Exception:
+        pass
+
+HAS_SPEECH = HAS_WHISPER and HAS_PYAUDIO
+
+
 
 
 # ANSI 色彩與特效定義
@@ -188,12 +292,18 @@ class GeminiStreamEngine:
         self.api_key = os.environ.get("GEMINI_API_KEY") or self.config.get("gemini_api_key", "")
         self.gemini_model = self.config.get("gemini_model", "gemini-2.5-flash")
         self.input_mode = self.config.get("input_mode", "both")
+        
+        # 麥克風 VAD 靈敏度與觸發設定 (預設 800 RMS 門檻，底噪 2.0 倍以上)
+        self.mic_trigger_threshold = self.config.get("mic_trigger_threshold", 800.0)
+        self.mic_sensitivity_factor = self.config.get("mic_sensitivity_factor", 2.0)
 
     def save_config(self):
         config_path = os.path.join(self.base_dir, "player_profile", "config.json")
         self.config["active_project"] = self.active_project
         self.config["gemini_model"] = self.gemini_model
         self.config["input_mode"] = self.input_mode
+        self.config["mic_trigger_threshold"] = self.mic_trigger_threshold
+        self.config["mic_sensitivity_factor"] = self.mic_sensitivity_factor
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(self.config, f, indent=2, ensure_ascii=False)
 
@@ -556,7 +666,7 @@ class GeminiStreamEngine:
         
         if is_visual and image_bytes:
             try:
-                img_part = types.Part.from_bytes(
+                img_part = Part.from_bytes(
                     data=image_bytes,
                     mime_type="image/jpeg"
                 )
@@ -582,7 +692,7 @@ class GeminiStreamEngine:
             target_model = self.gemini_model
             
             # API 呼叫配置：純文字模式 (TTS 由本地 speak_tts 負責)
-            config = types.GenerateContentConfig(
+            config = GenerateContentConfig(
                 system_instruction=sys_inst,
                 response_modalities=["TEXT"],
                 temperature=0.7
@@ -617,15 +727,15 @@ class GeminiStreamEngine:
                 
             # 7. 更新對話歷史脈絡 (轉換格式為 API 能接受的 History 結構)
             self.chat_history.append(
-                types.Content(
+                Content(
                     role="user",
-                    parts=[types.Part.from_text(text=user_input)]
+                    parts=[Part.from_text(text=user_input)]
                 )
             )
             self.chat_history.append(
-                types.Content(
+                Content(
                     role="model",
-                    parts=[types.Part.from_text(text=text_response)]
+                    parts=[Part.from_text(text=text_response)]
                 )
             )
             
@@ -1060,7 +1170,7 @@ class GeminiStreamEngine:
                 
                 print(f"{YELLOW}[🧠 AI DISTILLATION] 正在呼叫 Gemini API 提煉今日實況回憶日記...{RESET}")
                 
-                config = types.GenerateContentConfig(
+                config = GenerateContentConfig(
                     system_instruction=self.identity,
                     response_modalities=["TEXT"],
                     temperature=0.7
@@ -1191,7 +1301,7 @@ class GeminiStreamEngine:
         if HAS_PYAUDIO:
             modalities = ["AUDIO", "TEXT"]
             
-        config = types.LiveConnectConfig(
+        config = LiveConnectConfig(
             response_modalities=modalities,
             system_instruction=self.get_assembled_system_instruction()
         )
@@ -1410,9 +1520,9 @@ class GeminiStreamEngine:
                     energy_threshold = energy_threshold * 0.98 + rms * 0.02
                     energy_threshold = max(200.0, energy_threshold)
 
-                # 判斷觸發門檻 (底噪的 1.5 倍以上，且至少大於 400 RMS)
-                trigger_threshold = max(400.0, energy_threshold * 1.5)
-                trigger_threshold = min(trigger_threshold, 3000.0)
+                # 判斷觸發門檻 (自訂 VAD 觸發基準，預設為 800 RMS 且大於底噪 2.0 倍)
+                trigger_threshold = max(self.mic_trigger_threshold, energy_threshold * self.mic_sensitivity_factor)
+                trigger_threshold = min(trigger_threshold, 4000.0)
 
                 if rms > trigger_threshold:
                     if state == "LISTENING":
@@ -1454,30 +1564,13 @@ class GeminiStreamEngine:
 
     async def _process_mic_audio(self, audio_to_process, query_callback):
         """非同步分析並辨識實體麥克風的音訊數據"""
-        import struct
-        import math
-
-        duration = len(audio_to_process) / 32000.0
-        size_kb = len(audio_to_process) / 1024.0
-
-        num_samples = len(audio_to_process) // 2
-        samples = struct.unpack(f"{num_samples}h", audio_to_process)
-        rms = math.sqrt(sum(s**2 for s in samples) / len(samples)) if len(samples) > 0 else 0
-        volume_pct = (rms / 32768.0) * 100
-
-        print(f"\n{CYAN}[🔊 AUDIO ANALYZING]{RESET} 正在分析已接收的實體麥克風語音信號...")
-        print(f" ├─ 音訊長度: {duration:.2f} 秒 | 封包大小: {size_kb:.1f} KB")
-        print(f" └─ 平均音量: {rms:.1f} RMS ({volume_pct:.1f}%)")
-
         t_start = time.time()
         text = await self._transcribe_audio(audio_to_process)
         latency = time.time() - t_start
 
-        if text:
-            print(f"{GREEN}[🎤 MIC HEARD]{RESET} (辨識耗時: {latency:.2f}s) ─ {text}")
-            await query_callback(text)
-        else:
-            print(f"{YELLOW}[🎤 MIC HEARD]{RESET} (辨識耗時: {latency:.2f}s) ─ [未偵測到有效語意/環境噪聲]")
+        if text and text.strip():
+            print(f"\n{GREEN}[🎤 MIC HEARD]{RESET} (辨識耗時: {latency:.2f}s) ─ {text.strip()}")
+            await query_callback(text.strip())
 
     async def _transcribe_audio(self, pcm_data):
         """將 PCM 二進位數據轉為 WAV 並非同步執行語意辨識"""

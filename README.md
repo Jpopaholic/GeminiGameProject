@@ -17,7 +17,7 @@
 
 ### 2. 👂 雙通道聽覺系統 (Dual Ears Listener)
 * **環路音訊監聽**：支援虛擬音訊裝置（如 `BlackHole 2ch`），可即時監聽遊戲大音量或特定背景音效。
-* **本地離線語音辨識**：直接使用原生 `PyAudio` 進行語音輸入，並在本地運行極速、高精度的離線 **faster-whisper (base)** 語音辨識模型。
+* **本地離線語音辨識**：支援原生 `PyAudio`，並內建 Windows 平台免編譯的 **`sounddevice`** 雙通道離線聽覺降級備援。可在本地極速運行高精度的離線 **faster-whisper (base)** 語音辨識模型。
   * **動態語意詞彙引導**：轉譯時會自動提取 `brain_profile/base_skills/language.txt` 中的網路梗與習慣俚語作為 AI 的字彙引導，精確辨識實況專用語與網路梗。
   * **全球多國語言自動偵測**：系統預設啟用全球多國語言自動偵測機制，毫秒內即可自動判別中文、英文或日文等主流語言並進行高精度轉譯。
 
@@ -75,7 +75,7 @@ chmod +x setup_dependencies.sh
 ./setup_dependencies.sh
 ```
 
-*(此指令碼將會透過 Homebrew 安裝 `portaudio`，並藉由 `pip` 安裝 `pyaudio`、`google-genai`、`faster-whisper`、`obsws-python`、`mss` 與 `pillow` 等核心相依庫，完全免去瀏覽器側的麥克風權限要求。)*
+*(此指令碼將會安裝 `google-genai`、`faster-whisper`、`obsws-python`、`mss`、`pillow` 與 **`sounddevice`** 等核心相依庫。在 macOS 下會透過 Homebrew 安裝 `portaudio` 和 `pyaudio`；在 Windows 下，若 PyAudio 由於編譯環境問題而安裝失敗，引擎會自動啟用 `sounddevice` 進行無縫音訊側聽，完全免去複雜的 C++ 編譯環境配置。)*
 
 ### 2. 進行設定
 請複製 [player_profile/config.template.json](player_profile/config.template.json) 並命名為 `config.json`，同樣將 [player_profile/host_info.template.txt](player_profile/host_info.template.txt) 複製並命名為 `host_info.txt`：
@@ -95,13 +95,17 @@ chmod +x setup_dependencies.sh
   "streamer_name": "您的名字",
   "gemini_api_key": "您的_GEMINI_API_KEY",
   "gemini_model": "gemini-2.5-flash",
-  "input_mode": "both"
+  "input_mode": "both",
+  "mic_trigger_threshold": 800.0,
+  "mic_sensitivity_factor": 2.0
 }
 ```
 * **`gemini_model`**：大腦問答模型，預設為 `gemini-2.5-flash`。若 2.5 Flash 金鑰限額用完，可自由更改為 `gemini-3.5-flash` 等其他活躍模型實現秒級熱切換！
 * **`input_mode`**：實況主輸入管道。支援 `"keyboard"`（純鍵盤對談，關閉背景語音伺服器以節省資源）、`"voice"`（純語音側聽模式）、與 `"both"`（預設，語音+鍵盤雙模雙工同時啟用，鍵盤隨時可作打字備援）。
 * **`source_name`**：自訂 OBS 擷取圖層/來源名稱（如：`"遊戲擷取"` 或 `"視窗擷取"`）。若保持空字串 `""` 則自動智慧擷取當前 OBS 最外層 Program 場景畫面。
 * **`enabled`** (位於 `obs_websocket` 內)：**重要提醒！** 若要使用 OBS 畫面擷取，請務必將此欄位設為 **`true`**，否則引擎會因為安全降級防線，自動改為擷取您的本機實體螢幕畫面！
+* **`mic_trigger_threshold`**：實體麥克風 VAD（語音活動檢測）觸發門檻（RMS）。預設為 **`800.0`**。若您打字時的機械鍵盤撞擊聲、呼吸聲或主機風扇聲容易誤觸麥克風，可將此值往上調整（例如 `1000.0` 或 `1200.0`）；若您說話音量較溫柔小聲，可將此值調低（例如 `600.0`）。
+* **`mic_sensitivity_factor`**：麥克風音訊大於背景適應底噪的倍數比例。預設為 **`2.0`**（表示音訊強度必須大於底噪 2 倍以上才啟動錄音）。調大此值可進一步防止嘈雜的背景突發噪音誤啟辨識。
 
 ### 3. 驗證引擎功能
 在正式開播前，可使用以下指令碼驗證引擎的視覺擷取降級備份、語音 Instruction 組合等功能是否完全正常：
@@ -114,7 +118,7 @@ python3 test_engine.py
 ```bash
 python3 main.py
 ```
-* 互動模式：支援 **「鍵盤 CLI 終端機打字輸入」** 與 **「本地實體麥克風語音側聽」** 雙工輸入。當您在 `config.json` 開啟 `"input_mode": "voice"` 或 `"both"` 時，引擎會在背景自動啟動本地麥克風 VAD 離線聽覺監聽（依賴 PyAudio + faster-whisper），此時只需對著您的實體麥克風說話，在停止說話不到一秒內即可自動觸發離線語音辨識與 Gemini 響應，對答如流！
+* 互動模式：支援 **「鍵盤 CLI 終端機打字輸入」** 與 **「本地實體麥克風語音側聽」** 雙工輸入。當您在 `config.json` 開啟 `"input_mode": "voice"` 或 `"both"` 時，引擎會在背景自動啟動本地麥克風 VAD 離線聽覺監聽（支援 PyAudio / sounddevice 雙驅動模式 + faster-whisper），此時只需對著您的實體麥克風說話，在停止說話不到一秒內即可自動觸發離線語音辨識與 Gemini 響應，對答如流！
 * 輸入 `status`：查看當前安全額度消耗、專案與 OBS 連線狀態。
 * 輸入 `switch vibe_coding` 或 `switch gw2`：動態切換實況主題。
 * 輸入 `exit`：安全提煉記憶並存檔收播。

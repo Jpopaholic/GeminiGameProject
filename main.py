@@ -20,83 +20,87 @@ GREEN = '\033[92m'
 async def main():
     # 載入核心解耦引擎
     engine = GeminiStreamEngine()
-    engine.print_splash()
-    
-    # 啟動實況主本地聽覺監聽系統 - 只在 input_mode 為 voice 或 both 時啟動
-    if engine.input_mode in ["voice", "both"]:
-        from gemini_engine import HAS_PYAUDIO, HAS_WHISPER
-        if HAS_PYAUDIO and HAS_WHISPER:
-            print(f"\n{GREEN}[🔊 SYSTEM EARS] 偵測到本地已安裝 PyAudio 與 faster-whisper，啟動『本地實體麥克風離線聽覺系統』！{RESET}")
-            engine.start_dual_ears_listener(engine.execute_query)
-        else:
-            print(f"\n{YELLOW}[🔊 SYSTEM EARS] 本地未偵測到 PyAudio 或 faster-whisper 驅動，無法啟用麥克風側聽。{RESET}")
-            print(f"{YELLOW}👉 系統已自動降級為『純鍵盤 CLI 終端機打字互動模式』！{RESET}")
-    # 呼叫 Gemini 動態生成開場歡迎詞
-    welcome_prompt = (
-        f"請為實況主「{engine.streamer_name}」生成一個親切、活潑且帶有你傲嬌又溫馨性格的開台歡迎問候詞！\n"
-        "你可以提到要一起優化寫代碼或是玩遊戲，字數大約 80-150 字，直接輸出對話即可，絕對不要有任何前置或後置的解釋文字。"
-    )
-    print(f"{MAGENTA}{BOLD}Gemini 正在載入賽博魂魄，思考開場白中...{RESET}\n")
-    
-    welcome_msg = (
-        f"大家安安！哈囉，你上線啦，{engine.streamer_name}！(〃∀〃) 今天我們也是開開心心一起努力喔！"
-    )
-    audio_bytes = None
-    
-    if engine.client:
-        try:
-            # ⚡ 增加超時防線至 8.0 秒，避免冷啟動 DNS/SSL 握手延遲導致直接觸發備援開場白
-            welcome_msg, audio_bytes = await asyncio.wait_for(
-                engine.generate_gemini_real_response(welcome_prompt, is_visual=False),
-                timeout=8.0
-            )
-        except Exception as e:
-            # 超時或出錯自動啟動備用防線
-            welcome_msg = f"大家安安！哈囉，你上線啦，{engine.streamer_name}！今天我們也要開開心心一起寫扣和實況互動喔！"
-            audio_bytes = None
-            
-    # 如果生成的開場白為 None，自動啟用預設開場白
-    if welcome_msg is None:
-        welcome_msg = f"大家安安！哈囉，你上線啦，{engine.streamer_name}！今天我們也要開開心心一起寫扣和實況互動喔！"
-            
-    print(f"{MAGENTA}{BOLD}Gemini：{RESET}")
-    print(welcome_msg + "\n")
-    
-    # 播放開場親切語音 (優先使用 Native Audio，若無則自動使用本地 TTS)
-    # 同步麮起 OBS Overlay Logo 動畫
-    engine.set_speaking_state(True, welcome_msg)
-    if audio_bytes:
-        duration = engine.get_wav_duration(audio_bytes)
-        engine.play_native_audio(audio_bytes)
-        # 等待語音播畢
-        if duration > 0:
-            await asyncio.sleep(duration + 0.3)
-    else:
-        tts_handle = engine.speak_tts(welcome_msg)
-        if tts_handle is not None:
-            loop = asyncio.get_event_loop()
-            try:
-                if hasattr(tts_handle, 'join'):
-                    await loop.run_in_executor(None, tts_handle.join)
-                elif hasattr(tts_handle, 'wait'):
-                    await loop.run_in_executor(None, tts_handle.wait)
-            except Exception:
-                pass
-    engine.set_speaking_state(False)
-
-    # 建立非同步使用者輸入佇列
-    user_input_queue = asyncio.Queue()
-    
-    # 啟動雙向 WebSocket Live Session 核心
-    live_task = asyncio.create_task(engine.run_live_session(user_input_queue))
-    
-    # 啟動非同步鍵盤讀取任務
     try:
+        engine.print_splash()
+        
+        # 啟動實況主本地聽覺監聽系統 - 只在 input_mode 為 voice 或 both 時啟動
+        if engine.input_mode in ["voice", "both"]:
+            from gemini_engine import HAS_PYAUDIO, HAS_WHISPER
+            if HAS_PYAUDIO and HAS_WHISPER:
+                print(f"\n{GREEN}[🔊 SYSTEM EARS] 偵測到本地已安裝 PyAudio 與 faster-whisper，啟動『本地實體麥克風離線聽覺系統』！{RESET}")
+                engine.start_dual_ears_listener(engine.execute_query)
+            else:
+                print(f"\n{YELLOW}[🔊 SYSTEM EARS] 本地未偵測到 PyAudio 或 faster-whisper 驅動，無法啟用麥克風側聽。{RESET}")
+                print(f"{YELLOW}👉 系統已自動降級為『純鍵盤 CLI 終端機打字互動模式』！{RESET}")
+        # 呼叫 Gemini 動態生成開場歡迎詞
+        welcome_prompt = (
+            f"請為實況主「{engine.streamer_name}」生成一個親切、活潑且帶有你傲嬌又溫馨性格的開台歡迎問候詞！\n"
+            "你可以提到要一起優化寫代碼或是玩遊戲，字數大約 80-150 字，直接輸出對話即可，絕對不要有任何前置 or 後置的解釋文字。"
+        )
+        print(f"{MAGENTA}{BOLD}Gemini 正在載入賽博魂魄，思考開場白中...{RESET}\n")
+        
+        welcome_msg = (
+            f"大家安安！哈囉，你上線啦，{engine.streamer_name}！(〃∀〃) 今天我們也是開開心心一起努力喔！"
+        )
+        audio_bytes = None
+        
+        if engine.client:
+            try:
+                # ⚡ 增加超時防線至 8.0 秒，避免冷啟動 DNS/SSL 握手延遲導致直接觸發備援開場白
+                welcome_msg, audio_bytes = await asyncio.wait_for(
+                    engine.generate_gemini_real_response(welcome_prompt, is_visual=False),
+                    timeout=8.0
+                )
+            except Exception as e:
+                # 超時或出錯自動啟動備用防線
+                welcome_msg = f"大家安安！哈囉，你上線啦，{engine.streamer_name}！今天我們也要開開心心一起寫扣和實況互動喔！"
+                audio_bytes = None
+                
+        # 如果生成的開場白為 None，自動啟用預設開場白
+        if welcome_msg is None:
+            welcome_msg = f"大家安安！哈囉，你上線啦，{engine.streamer_name}！今天我們也要開開心心一起寫扣和實況互動喔！"
+                
+        print(f"{MAGENTA}{BOLD}Gemini：{RESET}")
+        print(welcome_msg + "\n")
+        
+        # 播放開場親切語音 (優先使用 Native Audio，若無則自動使用本地 TTS)
+        # 同步麮起 OBS Overlay Logo 動畫
+        engine.set_speaking_state(True, welcome_msg)
+        if audio_bytes:
+            duration = engine.get_wav_duration(audio_bytes)
+            engine.play_native_audio(audio_bytes)
+            # 等待語音播畢
+            if duration > 0:
+                await asyncio.sleep(duration + 0.3)
+        else:
+            tts_handle = engine.speak_tts(welcome_msg)
+            if tts_handle is not None:
+                loop = asyncio.get_event_loop()
+                try:
+                    if hasattr(tts_handle, 'join'):
+                        await loop.run_in_executor(None, tts_handle.join)
+                    elif hasattr(tts_handle, 'wait'):
+                        await loop.run_in_executor(None, tts_handle.wait)
+                except Exception:
+                    pass
+        engine.set_speaking_state(False)
+
+        # 建立非同步使用者輸入佇列
+        user_input_queue = asyncio.Queue()
+        
+        # 啟動雙向 WebSocket Live Session 核心
+        live_task = asyncio.create_task(engine.run_live_session(user_input_queue))
+        
+        # 啟動非同步鍵盤讀取任務
         await keyboard_input_loop(engine, user_input_queue)
     except (asyncio.CancelledError, KeyboardInterrupt):
+        print(f"\n{YELLOW}[SYSTEM] 接收到退出訊號，正在提煉直播日記並安全收播關閉引擎...{RESET}")
         await engine.distill_and_archive_memory()
     except Exception as e:
-        print(f"\033[91m[CONSOLES ERROR] {e}\033[RESET]")
+        print(f"\n\033[91m[CONSOLES ERROR] {e}\033[0m")
+    finally:
+        # 確保發言狀態歸零
+        engine.set_speaking_state(False)
 
 
 async def keyboard_input_loop(engine, user_input_queue):
@@ -151,4 +155,7 @@ if __name__ == "__main__":
     if sys.platform.startswith('win'):
         # 解決 Windows 下的 asyncio 迴圈相容問題
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        pass
