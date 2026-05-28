@@ -31,4 +31,5 @@ session_memories/*.wav
 
 # Game Tools (Ignore all game specific plugin folder contents)
 game_tools/*
+!game_tools/.gitkeep
 
