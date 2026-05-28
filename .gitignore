@@ -24,3 +24,7 @@ env/
 
 # Local Test / Mock Files (本地測試畫面備份，不提交至 GitHub)
 test_gameplay.jpg
+
+# Audio files
+*.wav
+session_memories/*.wav

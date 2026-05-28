@@ -22,9 +22,10 @@
   * **全球多國語言自動偵測**：系統預設啟用全球多國語言自動偵測機制，毫秒內即可自動判別中文、英文或日文等主流語言並進行高精度轉譯。
 
 
-### 3. 🛡️ 1M TPM 流量安全防護罩
-* **智慧額度監控**：內建 TPM（Tokens Per Minute）追蹤器，當每分鐘 Token 消耗量逼近 **850,000** 的警告水位時，會自動觸發警告。
-* **安全下班機制**：若達到 **1,000,000** 安全極限，助理會透過語音向觀眾與實況主大合照告別，並啟動安全保護自動關機下班，完美防止 API 額度超支。
+### 3. 🛡️ TPM 流量安全防護罩 (模型動態配置)
+* **智慧額度監控**：內建 TPM（Tokens Per Minute）追蹤器，當每分鐘 Token 消耗量逼近警告水位（依選用模型動態載入，如 `gemini-2.5-flash` 預設為 **850,000**）時，會自動觸發警告。
+* **安全下班機制**：若達到安全極限（如 `gemini-2.5-flash` 預設為 **1,000,000**），助理會透過語音向觀眾與實況主大合照告別，並啟動安全保護自動關機下班，完美防止 API 額度超支。
+* **模型專屬客製化**：支援在設定檔中為不同模型配置專屬額度（如 `gemini-3.5-flash` 額度更高，可自訂上限至 **2,000,000** TPM），系統會隨切換模型動態更新警戒線。
 
 ### 4. 🧠 靈魂設定與實況日記記憶 (Personality & Memories)
 * **繁體中文角色扮演**：依照 `brain_profile/identity.txt` 塑造專屬靈魂——一個懂網路梗、動漫 ACG、富有趣味與親和力的語音助理。
@@ -92,6 +93,20 @@ chmod +x setup_dependencies.sh
   "game_audio_device": "none",
   "tpm_safety_limit": 1000000,
   "tpm_warning_threshold": 850000,
+  "model_quotas": {
+    "gemini-2.5-flash": {
+      "tpm_safety_limit": 1000000,
+      "tpm_warning_threshold": 850000
+    },
+    "gemini-3.5-flash": {
+      "tpm_safety_limit": 2000000,
+      "tpm_warning_threshold": 1700000
+    },
+    "gemini-3.1-flash-lite": {
+      "tpm_safety_limit": 1500000,
+      "tpm_warning_threshold": 1200000
+    }
+  },
   "streamer_name": "您的名字",
   "assistant_call_name": "你",
   "gemini_api_key": "您的_GEMINI_API_KEY",
@@ -101,9 +116,10 @@ chmod +x setup_dependencies.sh
   "mic_sensitivity_factor": 2.0
 }
 ```
-* **`active_project`**：當前掛載的遊戲或情境專案名稱（如 `"vibe_coding"`、`"gw2"`）。**特別注意**：若設定為 **`"none"`**（即純閒談模式），**系統將不會開啟「眼睛」多模態畫面擷取功能**（對話中提到「你看」將不會觸發任何螢幕或 OBS 截圖），助理會以最省流量、最節省 Token 的溫馨日常陪伴模式與實況主純文字/語音閒聊。
+* **`active_project`**：當前掛載 the 遊戲或情境專案名稱（如 `"vibe_coding"`、`"gw2"`）。**特別注意**：若設定為 **`"none"`**（即純閒談模式），**系統將不會開啟「眼睛」多模態畫面擷取功能**（對話中提到「你看」將不會觸發 any 螢幕或 OBS 截圖），助理會以最省流量、最節省 Token 的溫馨日常陪伴模式與實況主純文字/語音閒聊。
 * **`assistant_call_name`**：召喚或觸發助理視覺解讀的稱呼設定。可支援單一字串（如 `"你"`），或字串清單（如 `["你", "吉米尼", "小精靈"]`）。當實況主或觀眾說出「`[稱呼]你看`」（例如「你看這個」、「吉米尼你看」、「小精靈你看」）時，即可自動觸發眼睛進行 OBS 或桌面畫面擷取。預設為 `"你"`。
 * **`gemini_model`**：大腦問答模型，預設為 `gemini-2.5-flash`。若 2.5 Flash 金鑰限額用完，可自由更改為 `gemini-3.5-flash` 等其他活躍模型實現秒級熱切換！
+* **`model_quotas`**：**（全新功能！）** 模型額度配置表。可為不同的 Gemini 模型（例如 `gemini-2.5-flash`、`gemini-3.5-flash` 或 `gemini-3.1-flash-lite`）自訂專屬的 TPM 安全上限（`tpm_safety_limit`）與警告水位（`tpm_warning_threshold`）。當您切換 `gemini_model` 時，系統會自動套用此表中對應模型的額度設定。若選用模型不在表中，則會自動降級並使用外層的 `tpm_safety_limit` 與 `tpm_warning_threshold` 作為預設全域設定值。
 * **`input_mode`**：實況主輸入管道。支援 `"keyboard"`（純鍵盤對談，關閉背景語音伺服器以節省資源）、`"voice"`（純語音側聽模式）、與 `"both"`（預設，語音+鍵盤雙模雙工同時啟用，鍵盤隨時可作打字備援）。
 * **`source_name`**：自訂 OBS 擷取圖層/來源名稱（如：`"遊戲擷取"` 或 `"視窗擷取"`）。若保持空字串 `""` 則自動智慧擷取當前 OBS 最外層 Program 場景畫面。
 * **`enabled`** (位於 `obs_websocket` 內)：**重要提醒！** 若要使用 OBS 畫面擷取，請務必將此欄位設為 **`true`**，否則引擎會因為安全降級防線，自動改為擷取您的本機實體螢幕畫面！

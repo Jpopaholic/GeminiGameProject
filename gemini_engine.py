@@ -220,8 +220,8 @@ class GeminiStreamEngine:
         # 載入核心設定
         self.load_config()
         self.tpm_tracker = TPMTracker(
-            limit=self.config.get("tpm_safety_limit", 1000000),
-            warning_threshold=self.config.get("tpm_warning_threshold", 850000)
+            limit=self.tpm_safety_limit,
+            warning_threshold=self.tpm_warning_threshold
         )
         
         # 互動歷程計數器 (供動態更新與日記提煉)
@@ -292,6 +292,22 @@ class GeminiStreamEngine:
         self.api_key = os.environ.get("GEMINI_API_KEY") or self.config.get("gemini_api_key", "")
         self.gemini_model = self.config.get("gemini_model", "gemini-2.5-flash")
         self.input_mode = self.config.get("input_mode", "both")
+        
+        # 根據模型動態解析 TPM 安全限制與警告閾值
+        model_quotas = self.config.get("model_quotas", {})
+        current_model = self.gemini_model
+        
+        if current_model in model_quotas:
+            self.tpm_safety_limit = model_quotas[current_model].get("tpm_safety_limit", 1000000)
+            self.tpm_warning_threshold = model_quotas[current_model].get("tpm_warning_threshold", 850000)
+        else:
+            self.tpm_safety_limit = self.config.get("tpm_safety_limit", 1000000)
+            self.tpm_warning_threshold = self.config.get("tpm_warning_threshold", 850000)
+            
+        # 動態更新 TPM 追蹤器的限制
+        if hasattr(self, 'tpm_tracker') and self.tpm_tracker:
+            self.tpm_tracker.limit = self.tpm_safety_limit
+            self.tpm_tracker.warning_threshold = self.tpm_warning_threshold
         
         # 麥克風 VAD 靈敏度與觸發設定 (預設 800 RMS 門檻，底噪 2.0 倍以上)
         self.mic_trigger_threshold = self.config.get("mic_trigger_threshold", 800.0)
@@ -466,7 +482,7 @@ class GeminiStreamEngine:
         """顯示目前的詳細核心數值"""
         print(f"\n{MAGENTA}{BOLD}[ENGINE STATUS]{RESET}")
         print(f" ├─ 當前掛載項目: {YELLOW}{BOLD}{self.active_project}{RESET}")
-        print(f" ├─ 近一分鐘 TPM: {GREEN if self.tpm_tracker.current_tpm < 850000 else RED}{self.tpm_tracker.current_tpm:,} / {self.tpm_tracker.limit:,}{RESET}")
+        print(f" ├─ 近一分鐘 TPM: {GREEN if self.tpm_tracker.current_tpm < self.tpm_tracker.warning_threshold else RED}{self.tpm_tracker.current_tpm:,} / {self.tpm_tracker.limit:,}{RESET}")
         print(f" ├─ 今日互動次數: {CYAN}{self.roast_count} 次{RESET}")
         print(f" └─ 當前實況氛圍: {GREEN}{self.vibe_score}% Vibe{RESET}\n")
 
@@ -781,20 +797,17 @@ class GeminiStreamEngine:
             return
             
         try:
-            temp_dir = os.path.join(self.base_dir, "session_memories")
-            os.makedirs(temp_dir, exist_ok=True)
-            temp_path = os.path.join(temp_dir, "temp_response.wav")
-            
-            # 寫入 WAV 二進位資料
-            with open(temp_path, "wb") as f:
-                f.write(audio_bytes)
-                
             # 依作業系統選擇合適的播放方式
             if sys.platform.startswith('win'):
                 import winsound
-                # 使用 winsound.SND_FILENAME 以檔案播放，SND_ASYNC 進行非阻塞非同步背景播放
-                winsound.PlaySound(temp_path, winsound.SND_FILENAME | winsound.SND_ASYNC)
+                # Windows 支援直接從記憶體播放二進位 WAV 資料，完美避開實體檔案寫入與 Git 追蹤問題
+                winsound.PlaySound(audio_bytes, winsound.SND_MEMORY | winsound.SND_ASYNC)
             elif sys.platform.startswith('darwin'):
+                import tempfile
+                # macOS 等外部播放器需要實體路徑，將檔案寫入系統暫存目錄（避免污染專案 Git）
+                temp_path = os.path.join(tempfile.gettempdir(), "temp_response.wav")
+                with open(temp_path, "wb") as f:
+                    f.write(audio_bytes)
                 # 透過 macOS 內建的 afplay 進行音效播放 (非阻塞式背景執行)
                 subprocess.Popen(
                     ["afplay", temp_path],
@@ -1064,11 +1077,11 @@ class GeminiStreamEngine:
             if tpm_status == "EXCEEDED":
                 # 觸發安全流量守護防線！
                 self.is_quota_warning = True
-                print(f"\n{BG_RED}{BOLD}[🚨 TPM LIMIT BURST 🚨] 偵測到 1M TPM 警戒線已安全超載！啟動自動流量守護防線！{RESET}")
+                print(f"\n{BG_RED}{BOLD}[🚨 TPM LIMIT BURST 🚨] 偵測到 {self.tpm_tracker.limit:,} TPM 警戒線已安全超載！啟動自動流量守護防線！{RESET}")
                 await asyncio.sleep(0.5)
                 print(f"\n{MAGENTA}{BOLD}Gemini：{RESET}")
                 warning_exit_msg = (
-                    f"『哎呀{self.streamer_name}！我們今天的實況互動真的太熱烈了，TPM 已經達到安全上限囉！(〃∀〃)』\n"
+                    f"『哎呀{self.streamer_name}！我們今天的實況互動真的太熱烈了，TPM 已經達到安全上限 {self.tpm_tracker.limit:,} 囉！(〃∀〃)』\n"
                     f"『為了好好守護系統頻寬與流量，本助理要先啟動安全保護下班囉！今天真的辛苦{self.streamer_name}了，我們收播囉，大家大合照拜拜！』"
                 )
                 print(f"{YELLOW}{warning_exit_msg}{RESET}\n")
@@ -1092,7 +1105,7 @@ class GeminiStreamEngine:
                 sys.exit(0)
                 
             elif tpm_status == "WARNING":
-                print(f"\n{BG_BLACK_FG_YELLOW}[⚠️ TPM WARNING] 當前 TPM 達 {self.tpm_tracker.current_tpm:,}，已逼近 850,000 限額！防護罩隨時可能開啟！{RESET}")
+                print(f"\n{BG_BLACK_FG_YELLOW}[⚠️ TPM WARNING] 當前 TPM 達 {self.tpm_tracker.current_tpm:,}，已逼近 {self.tpm_tracker.warning_threshold:,} 限額！防護罩隨時可能開啟！{RESET}")
 
             # 7. 播放語音 (優先使用 Native Audio，無則使用本地 TTS)
             self.set_speaking_state(True, ai_response)
@@ -1609,16 +1622,6 @@ class GeminiStreamEngine:
                 wav_file.writeframes(pcm_data)
             wav_buf.seek(0)
 
-            # 同時寫入本地暫存音檔，提供偵錯與 ASR 輸入
-            import os
-            debug_path = os.path.join(self.base_dir, "session_memories", "temp_mic.wav")
-            try:
-                os.makedirs(os.path.dirname(debug_path), exist_ok=True)
-                with open(debug_path, "wb") as f:
-                    f.write(wav_buf.getvalue())
-            except Exception:
-                pass
-
             # 構建統一化 ASR 語氣引導 prompt ─ 結合語意設定 (language.txt)
             prompt = ""
             if hasattr(self, 'base_skill_language') and self.base_skill_language:
@@ -1629,7 +1632,7 @@ class GeminiStreamEngine:
 
             # 執行離線轉譯 ─ 採用多國語言自動偵測 (language=None)，極致通用！
             segments, info = self.whisper_model.transcribe(
-                debug_path,
+                wav_buf,
                 beam_size=5,
                 language=None,
                 initial_prompt=prompt
