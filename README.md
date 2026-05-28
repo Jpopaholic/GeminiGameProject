@@ -46,25 +46,31 @@
 
 ## 📂 專案架構 (Project Structure)
 
+本專案採用**完全解耦的模組化架構**。為了提高可維護性並防止單一檔案過於龐大，核心引擎已拆分為「大腦、眼睛、耳朵、嘴巴」四個感官感測元件，並透過 Pythonic Mixin 進行狀態完美共享：
+
 ```bash
 ├── main.py                    # 實況主互動主控台 CLI (雙模輸入、非同步事件循環)
-├── gemini_engine.py           # 萬用實況助理核心引擎 (視覺/聽覺/安全防護/語音輸出)
+├── gemini_engine.py           # 核心引擎門面 (Facade & Orchestrator，採用 Mixin 繼承設計)
+├── gemini_shared.py           # 賽博相容與共享基礎庫 (Unicode 修正、模擬 sounddevice 聲卡、TPM 流量防禦、色彩)
+├── gemini_eyes.py             # 👁️ 眼睛 (視覺 / OBS 截圖與 mss 螢幕側擷元件)
+├── gemini_mouth.py            # 👄 嘴巴 (語音輸出 / 本地 SAPI & say 語音、原生 WAV 播放元件)
+├── gemini_ears.py             # 👂 耳朵 (聽覺 / 麥克風 VAD 離線 faster-whisper ASR 與遊戲音訊監控)
+├── gemini_brain.py            # 🧠 大腦 (智慧推理 / Gemini API 連線、LLM 對話推理、日記記憶與 Live Session)
 ├── test_engine.py             # 引擎自主功能驗證與測試指令碼
 ├── setup_dependencies.sh      # macOS 環境相依性套件一鍵安裝指令碼
-├── setup_dependencies.bat     # Windows 批次檔 (一鍵安裝相依套件，含 VAD/ASR/TTS)
+├── setup_dependencies.bat     # Windows 批次檔 (一鍵安裝相依套件)
 ├── setup_dependencies.ps1     # Windows PowerShell 腳本 (一鍵安裝相依套件)
 ├── player_profile/
 │   ├── config.template.json   # 核心系統設定模板 (複製為 config.json 使用)
 │   ├── host_info.template.txt # 實況主背景設定模板 (複製為 host_info.txt 使用)
-│   └── .gitignore 排除檔案     # config.json 與 host_info.txt 已被 git 忽略，保護隱私
+│   └── .gitignore 排除檔案     # config.json 等敏感資訊已被 git 忽略
 ├── brain_profile/
 │   ├── identity.txt           # AI 助理的靈魂人格設定
 │   └── base_skills/           # 基礎常識與語言風格庫
 ├── stream_overlay/
 │   └── index.html             # OBS 實況發光 Logo 掛件 (整合粒子與磨砂字幕框)
-└── game_tools/                # 專案情境專屬技能庫
-    ├── gw2/                   # 激戰 2 專用技能 (市場、機制等)
-    └── vibe_coding/           # Vibe Coding 專用技能 (Kotlin 規則等)
+└── game_tools/                # 專案情境專屬技能庫 (此目錄下的子資料夾均已被 Git 忽略，保護實況主隱私與配置)
+    └── README.md              # 說明文件與插件規格指南
 ```
 
 ---
