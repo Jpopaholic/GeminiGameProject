@@ -50,7 +50,9 @@
 ├── main.py                    # 實況主互動主控台 CLI (雙模輸入、非同步事件循環)
 ├── gemini_engine.py           # 萬用實況助理核心引擎 (視覺/聽覺/安全防護/語音輸出)
 ├── test_engine.py             # 引擎自主功能驗證與測試指令碼
-├── setup_dependencies.sh      # 系統環境與相依性套件一鍵安裝指令碼
+├── setup_dependencies.sh      # macOS 環境相依性套件一鍵安裝指令碼
+├── setup_dependencies.bat     # Windows 批次檔 (一鍵安裝相依套件，含 VAD/ASR/TTS)
+├── setup_dependencies.ps1     # Windows PowerShell 腳本 (一鍵安裝相依套件)
 ├── player_profile/
 │   ├── config.template.json   # 核心系統設定模板 (複製為 config.json 使用)
 │   ├── host_info.template.txt # 實況主背景設定模板 (複製為 host_info.txt 使用)
@@ -70,13 +72,30 @@
 ## 🚀 快速開始 (Quick Start)
 
 ### 1. 安裝環境相依性
-本專案支援 macOS 與 Windows。在 macOS 下可直接執行一鍵安裝指令碼：
+本專案支援 macOS 與 Windows，均已提供一鍵安裝腳本：
+
+#### 🍏 macOS 安裝方法：
+在終端機中執行：
 ```bash
 chmod +x setup_dependencies.sh
 ./setup_dependencies.sh
 ```
 
-*(此指令碼將會安裝 `google-genai`、`faster-whisper`、`obsws-python`、`mss`、`pillow` 與 **`sounddevice`** 等核心相依庫。在 macOS 下會透過 Homebrew 安裝 `portaudio` 和 `pyaudio`；在 Windows 下，若 PyAudio 由於編譯環境問題而安裝失敗，引擎會自動啟用 `sounddevice` 進行無縫音訊側聽，完全免去複雜的 C++ 編譯環境配置。)*
+#### 🪟 Windows 安裝方法：
+您可以透過以下兩種方式之一安裝 Windows 相依套件：
+* **使用批次檔（命令提示字元）**：
+  直接在專案目錄下雙擊執行 **`setup_dependencies.bat`** 檔案即可，或在 cmd 中執行：
+  ```cmd
+  setup_dependencies.bat
+  ```
+* **使用 PowerShell 腳本**：
+  在 PowerShell 中執行：
+  ```powershell
+  Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process
+  ./setup_dependencies.ps1
+  ```
+
+*(這些腳本會自動為您安裝 `google-genai`、`faster-whisper`、`obsws-python`、`mss`、`pillow` 與 **`sounddevice`** 等核心相依庫。在 macOS 下會透過 Homebrew 安裝 `portaudio` 與 `pyaudio`；在 Windows 下，即使 PyAudio 由於編譯環境問題而安裝失敗也完全不用擔心！核心引擎會自動啟用 `sounddevice` 進行無縫音訊側聽與 VAD 分析，免除您配置複雜的 C++ 編譯環境！)*
 
 ### 2. 進行設定
 請複製 [player_profile/config.template.json](player_profile/config.template.json) 並命名為 `config.json`，同樣將 [player_profile/host_info.template.txt](player_profile/host_info.template.txt) 複製並命名為 `host_info.txt`：
