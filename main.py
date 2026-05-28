@@ -85,14 +85,9 @@ async def main():
                     pass
         engine.set_speaking_state(False)
 
-        # 建立非同步使用者輸入佇列
-        user_input_queue = asyncio.Queue()
-        
-        # 啟動雙向 WebSocket Live Session 核心
-        live_task = asyncio.create_task(engine.run_live_session(user_input_queue))
-        
+        # 💡 核心優化：移除冗餘的 WebSocket Live 背景連動，全面改走穩定的 execute_query 單通道，徹底解決 RPM 居高不下的背景流量消耗！
         # 啟動非同步鍵盤讀取任務
-        await keyboard_input_loop(engine, user_input_queue)
+        await keyboard_input_loop(engine)
     except (asyncio.CancelledError, KeyboardInterrupt):
         print(f"\n{YELLOW}[SYSTEM] 接收到退出訊號，正在提煉直播日記並安全收播關閉引擎...{RESET}")
         await engine.distill_and_archive_memory()
@@ -103,8 +98,8 @@ async def main():
         engine.set_speaking_state(False)
 
 
-async def keyboard_input_loop(engine, user_input_queue):
-    """非同步非阻塞讀取鍵盤輸入，並送入實時發送佇列"""
+async def keyboard_input_loop(engine):
+    """非同步非阻塞讀取鍵盤輸入，直接觸發 execute_query"""
     while True:
         try:
             # 非同步讀取鍵盤終端機輸入 (保留鍵盤操作，作為雙模輸入)

@@ -296,6 +296,13 @@ class GeminiStreamEngine:
         # 麥克風 VAD 靈敏度與觸發設定 (預設 800 RMS 門檻，底噪 2.0 倍以上)
         self.mic_trigger_threshold = self.config.get("mic_trigger_threshold", 800.0)
         self.mic_sensitivity_factor = self.config.get("mic_sensitivity_factor", 2.0)
+        
+        # 載入助理稱呼召喚詞，可支援單一字串，或字串清單
+        call_name_cfg = self.config.get("assistant_call_name", "你")
+        if isinstance(call_name_cfg, list):
+            self.assistant_call_names = [str(name).lower() for name in call_name_cfg]
+        else:
+            self.assistant_call_names = [str(call_name_cfg).lower()]
 
     def save_config(self):
         config_path = os.path.join(self.base_dir, "player_profile", "config.json")
@@ -582,12 +589,18 @@ class GeminiStreamEngine:
 
         user_input_lower = user_input.lower()
         
-        # 2. 安全流量防護 (核心引擎機制)：說了 "你看" 但沒說 "gemini"、"吉米尼" 或 "你" 的情況下，拒絕截圖以守護 TPM
+        # 2. 安全流量防護 (核心引擎機制)：說了 "你看" 但沒說 "gemini"、"吉米尼" 或召喚詞的情況下，拒絕截圖以守護 TPM
         is_casual_mode = not self.active_project or self.active_project.lower() == "none"
-        if "你看" in user_input and not ("gemini" in user_input_lower or "吉米尼" in user_input_lower or "你" in user_input_lower) and not is_casual_mode:
+        is_summon_called = "gemini" in user_input_lower or "吉米尼" in user_input_lower or any(name in user_input_lower for name in self.assistant_call_names)
+        if "你看" in user_input and not is_summon_called and not is_casual_mode:
+            call_name_raw = self.config.get("assistant_call_name", "你")
+            if isinstance(call_name_raw, list):
+                call_sign_str = "、".join(f"『{name}』" for name in call_name_raw)
+            else:
+                call_sign_str = f"『{call_name_raw}』"
             return (
                 f"哼，我聽到{self.streamer_name}說『你看』了喔！( ¯▽¯)\n"
-                "但你沒有加上召喚本助理的通關密語『Gemini』，本系統才不會幫你擷取畫面呢！\n"
+                f"但你沒有加上召喚本助理的通關密語『Gemini』或{call_sign_str}，本系統才不會幫你擷取畫面呢！\n"
                 "480p 壓縮畫面也是要耗費實體流量跟 Tokens 的好嗎？\n"
                 "今天本助理依然是在替你勤儉持家、守護 1M TPM 的流量防爆神，不用謝我了！┐(´д`)┌"
             )
@@ -998,8 +1011,8 @@ class GeminiStreamEngine:
             # 檢查是否為背景遊戲音效偵測
             is_audio_event = user_input.startswith("[系統音效提示：")
             
-            # 語音中文辨識優化：將召喚詞擴充，支援中文的 "吉米尼" 與 "你" (例如風子說：「你看這個」即可直接觸發)
-            is_gemini_called = "gemini" in user_input_lower or "吉米尼" in user_input_lower or "你" in user_input_lower or is_audio_event
+            # 語音中文辨識優化：將召喚詞擴充，支援中文的 "吉米尼" 與設定的召喚詞 (例如風子說：「你看這個」即可直接觸發)
+            is_gemini_called = "gemini" in user_input_lower or "吉米尼" in user_input_lower or any(name in user_input_lower for name in self.assistant_call_names) or is_audio_event
             
             is_casual_mode = not self.active_project or self.active_project.lower() == "none"
             
@@ -1426,7 +1439,7 @@ class GeminiStreamEngine:
                 
                 # 處理視覺截圖連動
                 is_casual_mode = not self.active_project or self.active_project.lower() == "none"
-                is_visual_trigger = ("你看" in user_input and ("gemini" in user_input_lower or "吉米尼" in user_input_lower or "你" in user_input_lower)) and not is_casual_mode
+                is_visual_trigger = ("你看" in user_input and ("gemini" in user_input_lower or "吉米尼" in user_input_lower or any(name in user_input_lower for name in self.assistant_call_names))) and not is_casual_mode
                 
                 if is_visual_trigger:
                     image_bytes, _ = await self.run_visual_capture()

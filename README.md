@@ -93,6 +93,7 @@ chmod +x setup_dependencies.sh
   "tpm_safety_limit": 1000000,
   "tpm_warning_threshold": 850000,
   "streamer_name": "您的名字",
+  "assistant_call_name": "你",
   "gemini_api_key": "您的_GEMINI_API_KEY",
   "gemini_model": "gemini-2.5-flash",
   "input_mode": "both",
@@ -100,6 +101,8 @@ chmod +x setup_dependencies.sh
   "mic_sensitivity_factor": 2.0
 }
 ```
+* **`active_project`**：當前掛載的遊戲或情境專案名稱（如 `"vibe_coding"`、`"gw2"`）。**特別注意**：若設定為 **`"none"`**（即純閒談模式），**系統將不會開啟「眼睛」多模態畫面擷取功能**（對話中提到「你看」將不會觸發任何螢幕或 OBS 截圖），助理會以最省流量、最節省 Token 的溫馨日常陪伴模式與實況主純文字/語音閒聊。
+* **`assistant_call_name`**：召喚或觸發助理視覺解讀的稱呼設定。可支援單一字串（如 `"你"`），或字串清單（如 `["你", "吉米尼", "小精靈"]`）。當實況主或觀眾說出「`[稱呼]你看`」（例如「你看這個」、「吉米尼你看」、「小精靈你看」）時，即可自動觸發眼睛進行 OBS 或桌面畫面擷取。預設為 `"你"`。
 * **`gemini_model`**：大腦問答模型，預設為 `gemini-2.5-flash`。若 2.5 Flash 金鑰限額用完，可自由更改為 `gemini-3.5-flash` 等其他活躍模型實現秒級熱切換！
 * **`input_mode`**：實況主輸入管道。支援 `"keyboard"`（純鍵盤對談，關閉背景語音伺服器以節省資源）、`"voice"`（純語音側聽模式）、與 `"both"`（預設，語音+鍵盤雙模雙工同時啟用，鍵盤隨時可作打字備援）。
 * **`source_name`**：自訂 OBS 擷取圖層/來源名稱（如：`"遊戲擷取"` 或 `"視窗擷取"`）。若保持空字串 `""` 則自動智慧擷取當前 OBS 最外層 Program 場景畫面。
