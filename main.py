@@ -22,18 +22,15 @@ async def main():
     engine = GeminiStreamEngine()
     engine.print_splash()
     
-    # 啟動實況主聽覺監聽系統 - 只在 input_mode 為 voice 或 both 時啟動
+    # 啟動實況主本地聽覺監聽系統 - 只在 input_mode 為 voice 或 both 時啟動
     if engine.input_mode in ["voice", "both"]:
-        from gemini_engine import HAS_PYAUDIO, HAS_SPEECH
-        # 優先啟動 PyAudio 本地實體聽覺系統 (偵測靈敏度最高、硬體級降噪，對 Windows 支援極好)
-        if HAS_PYAUDIO and HAS_SPEECH:
-            print(f"\n{GREEN}[🔊 SYSTEM EARS] 偵測到本地已安裝 PyAudio，優先啟動『本地實體麥克風側聽系統』！{RESET}")
+        from gemini_engine import HAS_PYAUDIO, HAS_WHISPER
+        if HAS_PYAUDIO and HAS_WHISPER:
+            print(f"\n{GREEN}[🔊 SYSTEM EARS] 偵測到本地已安裝 PyAudio 與 faster-whisper，啟動『本地實體麥克風離線聽覺系統』！{RESET}")
             engine.start_dual_ears_listener(engine.execute_query)
         else:
-            # 若無 PyAudio 驅動，自動降級啟用 OBS Browser Web Audio Ears 聽覺伺服器
-            print(f"\n{YELLOW}[🔊 SYSTEM EARS] 本地未偵測到 PyAudio 驅動，自動啟動『OBS Web 網頁麥克風側聽伺服器』...{RESET}")
-            if hasattr(engine, 'start_ears_server'):
-                await engine.start_ears_server()
+            print(f"\n{YELLOW}[🔊 SYSTEM EARS] 本地未偵測到 PyAudio 或 faster-whisper 驅動，無法啟用麥克風側聽。{RESET}")
+            print(f"{YELLOW}👉 系統已自動降級為『純鍵盤 CLI 終端機打字互動模式』！{RESET}")
     # 呼叫 Gemini 動態生成開場歡迎詞
     welcome_prompt = (
         f"請為實況主「{engine.streamer_name}」生成一個親切、活潑且帶有你傲嬌又溫馨性格的開台歡迎問候詞！\n"

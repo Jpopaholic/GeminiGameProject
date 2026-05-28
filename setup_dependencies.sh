@@ -10,8 +10,8 @@ echo -e "\033[93m[1/3] Upgrading pip...\033[0m"
 python3 -m pip install --user --upgrade pip
 
 # 2. Install base requirements
-echo -e "\033[93m[2/3] Installing core libraries (Gemini SDK, Pillow, OBS WebSocket, MSS, Speech, TTS, WebSockets)...\033[0m"
-python3 -m pip install --user google-genai obsws-python pillow mss SpeechRecognition edge-tts websockets
+echo -e "\033[93m[2/3] Installing core libraries (Gemini SDK, Pillow, OBS WebSocket, MSS, ASR (Whisper), TTS, WebSockets)...\033[0m"
+python3 -m pip install --user google-genai obsws-python pillow mss faster-whisper edge-tts websockets
 
 # 3. Try to install pyaudio
 echo -e "\033[93m[3/3] Trying to install pyaudio (microphone capture support)...\033[0m"

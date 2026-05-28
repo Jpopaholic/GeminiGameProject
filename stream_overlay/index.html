@@ -283,9 +283,6 @@
 </head>
 <body>
 
-    <!-- 頂部偵錯與模式切換區 (串流時不顯示或可點擊切換) -->
-    <div class="debug-panel" id="mode-toggle">模式: JSON 輪詢偵測 (點擊切換語音觸發模式)</div>
-
     <div class="overlay-container" id="overlay-container">
         <!-- 粒子 Canvas -->
         <canvas id="particle-canvas"></canvas>
@@ -331,7 +328,6 @@
         const logoWrapper = document.getElementById('logo-wrapper');
         const subtitleBox = document.getElementById('subtitle-box');
         const subtitleText = document.getElementById('subtitle-text');
-        const modeToggle = document.getElementById('mode-toggle');
         const canvas = document.getElementById('particle-canvas');
         const ctx = canvas.getContext('2d');
 
@@ -339,7 +335,6 @@
         let isSpeaking = false;
         let lastSpeakText = "";
         let checkInterval = 100; // JSON 輪詢間隔 (ms)
-        let mode = "JSON"; // "JSON" 或 "AUDIO"
         let subtitleTimeout;
 
         // 畫布大小重置
@@ -452,7 +447,7 @@
                     container.classList.remove('speaking');
                     logoWrapper.classList.add('logo-breathing');
                     
-                    // 當結束說話時，設定 3 秒後自動隱藏字幕對話框
+                    // 當結束說話時，設定 4 秒後自動隱藏字幕對話框
                     clearTimeout(subtitleTimeout);
                     subtitleTimeout = setTimeout(() => {
                         subtitleBox.classList.remove('show');
@@ -461,7 +456,7 @@
             }
         }
 
-        // --- 模式 1：JSON 輪詢機制 ---
+        // --- 狀態偵測：JSON 輪詢機制 ---
         // 支援雙路徑偵測：
         //   A) HTTP 伺服器環境：使用 fetch() 讀取 speaking_state.json
         //   B) 本機 file:// 環境：動態載入 speaking_state.js (window.speakingState) 繞過 CORS 限制
@@ -469,38 +464,27 @@
         let lastScriptTimestamp = 0; // 防止重複處理同一狀態
 
         async function pollStateFile() {
-            if (mode !== "JSON") return;
-            
             // 嘗試 fetch，失敗則降級為動態載入 JS 
             if (corsMode !== 'script') {
                 try {
                     const response = await fetch('../player_profile/speaking_state.json', { cache: "no-store" });
                     if (response.ok) {
                         const data = await response.json();
-                        if (corsMode !== 'fetch') {
-                            corsMode = 'fetch';
-                            modeToggle.innerText = "模式: JSON 輪詢偵測 (點擊切換語音觸發模式)";
-                        }
+                        corsMode = 'fetch';
                         updateSpeechState(data.speaking, data.text);
                         return;
                     }
                 } catch (error) {
                     // fetch 失敗 (CORS / 檔案尚未生成)——自動切換 JS 降級方案
-                    if (corsMode !== 'script') {
-                        corsMode = 'script';
-                        modeToggle.innerText = "模式: JS 載入偵測 (本機檔案模式)";
-                        modeToggle.style.color = "var(--gemini-cyan)";
-                    }
+                    corsMode = 'script';
                 }
             }
             
             // 降級方案：動態載入 speaking_state.js script tag
             if (corsMode === 'script') {
-                // 移除舊的 script tag (IF EXISTS)
                 const old = document.getElementById('speaking-state-script');
                 if (old) old.remove();
                 
-                // 對時間戳進行綺串确保不被的快取
                 const script = document.createElement('script');
                 script.id = 'speaking-state-script';
                 script.src = `../player_profile/speaking_state.js?t=${Date.now()}`;
@@ -516,72 +500,6 @@
 
         // 啟動定時輪詢
         setInterval(pollStateFile, checkInterval);
-
-        // --- 模式 2：真實麥克風/音訊監聽反應模式 (Audio Reactive Mode) ---
-        // 點擊 debug panel 或雙擊 Logo 可切換，適用於直接接收系統音效，無須輪詢
-        let audioCtx, analyser, microphone, dataArray;
-        
-        async function initAudioReactive() {
-            try {
-                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-                
-                analyser = audioCtx.createAnalyser();
-                analyser.fftSize = 256;
-                const bufferLength = analyser.frequencyBinCount;
-                dataArray = new Uint8Array(bufferLength);
-                
-                microphone = audioCtx.createMediaStreamSource(stream);
-                microphone.connect(analyser);
-                
-                detectAudioVolume();
-                modeToggle.innerText = "模式: 麥克風音量感應反應";
-                modeToggle.style.color = "var(--gemini-magenta)";
-            } catch (err) {
-                alert("無法取得音訊裝置權限！請確認是否允許麥克風存取。");
-                mode = "JSON";
-                modeToggle.innerText = "模式: JSON 輪詢偵測 (點擊切換語音觸發模式)";
-                modeToggle.style.color = "#718096";
-            }
-        }
-
-        function detectAudioVolume() {
-            if (mode !== "AUDIO") return;
-            analyser.getByteFrequencyData(dataArray);
-            
-            let sum = 0;
-            for (let i = 0; i < dataArray.length; i++) {
-                sum += dataArray[i];
-            }
-            
-            // 平均振幅音量
-            const average = sum / dataArray.length;
-            
-            // 當平均聲量高於閾值時，視為發言亮起
-            if (average > 18) { 
-                const scale = 1 + (average / 120);
-                logoWrapper.style.transform = `scale(${Math.min(1.3, scale)}) rotate(${average / 15}deg)`;
-                updateSpeechState(true, "🎤 正在聆聽/播放實況音訊中...");
-            } else {
-                logoWrapper.style.transform = '';
-                updateSpeechState(false);
-            }
-            
-            requestAnimationFrame(detectAudioVolume);
-        }
-
-        // 模式切換點擊事件
-        modeToggle.addEventListener('click', () => {
-            if (mode === "JSON") {
-                mode = "AUDIO";
-                initAudioReactive();
-            } else {
-                mode = "JSON";
-                logoWrapper.style.transform = '';
-                modeToggle.innerText = "模式: JSON 輪詢偵測 (點擊切換語音觸發模式)";
-                modeToggle.style.color = "#718096";
-            }
-        });
 
         // 雙擊 Logo 觸發模擬說話 (展示與測試用！)
         logoWrapper.addEventListener('dblclick', () => {
@@ -599,98 +517,6 @@
             setTimeout(() => {
                 if(!isSpeaking) logoWrapper.style.transform = '';
             }, 150);
-        });
-
-        // --- 模式 3：寫法 B - OBS 網頁圖層 HTML5 語音側聽與 WebSocket 實時傳輸 ---
-        let wsEars;
-        let audioContextEars;
-        let scriptNodeEars;
-        let micSourceEars;
-
-        async function startEarsStreaming() {
-            try {
-                // 連接本地 ASR 監聽伺服器
-                wsEars = new WebSocket('ws://localhost:9002');
-                wsEars.binaryType = 'arraybuffer';
-                
-                wsEars.onopen = () => {
-                    console.log("已連線本地語音監聽伺服器！");
-                    modeToggle.innerText = "模式: 語音監聽 & 鍵盤雙向 (連線成功)";
-                    modeToggle.style.color = "var(--gemini-cyan)";
-                };
-                
-                wsEars.onclose = () => {
-                    console.log("語音監聽伺服器斷開，3 秒後重連...");
-                    modeToggle.innerText = "模式: 語音監聽斷開 (嘗試重連中...)";
-                    modeToggle.style.color = "#e53e3e";
-                    setTimeout(startEarsStreaming, 3000);
-                };
-                
-                wsEars.onerror = (e) => {
-                    console.error("語音監聽 WebSocket 錯誤:", e);
-                };
-
-                // 取得麥克風音訊
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    audio: {
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        autoGainControl: true
-                    }, 
-                    video: false 
-                });
-
-                // 限制取樣率為 16000Hz 以適應 ASR 模型
-                audioContextEars = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-                
-                // 強制恢復 AudioContext 狀態，繞過 OBS 瀏覽器無點擊自動掛起限制
-                if (audioContextEars.state === 'suspended') {
-                    await audioContextEars.resume();
-                }
-                
-                micSourceEars = audioContextEars.createMediaStreamSource(stream);
-                
-                // 單聲道輸入，緩衝區 4096
-                scriptNodeEars = audioContextEars.createScriptProcessor(4096, 1, 1);
-                
-                scriptNodeEars.onaudioprocess = (audioProcessingEvent) => {
-                    if (!wsEars || wsEars.readyState !== WebSocket.OPEN) return;
-                    
-                    const inputBuffer = audioProcessingEvent.inputBuffer;
-                    const inputData = inputBuffer.getChannelData(0); // 16kHz Float32Array
-                    
-                    // 轉為 16-bit PCM (Int16) 數據
-                    const pcmData = new Int16Array(inputData.length);
-                    for (let i = 0; i < inputData.length; i++) {
-                        const s = Math.max(-1, Math.min(1, inputData[i]));
-                        pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-                    }
-                    
-                    // 發送二進位 PCM 音訊資料
-                    wsEars.send(pcmData.buffer);
-                };
-                
-                micSourceEars.connect(scriptNodeEars);
-                scriptNodeEars.connect(audioContextEars.destination);
-                console.log("OBS 賽博耳朵已就緒！實時串流 16kHz PCM 音訊...");
-                
-            } catch (err) {
-                console.error("初始化麥克風語音側聽失敗:", err);
-                modeToggle.innerText = "模式: 語音監聽啟動失敗 (無麥克風權限)";
-                modeToggle.style.color = "#e53e3e";
-            }
-        }
-
-        // 頁面加載後自動連線
-        window.addEventListener('load', () => {
-            startEarsStreaming();
-        });
-
-        // 用戶點擊手勢恢復 AudioContext
-        window.addEventListener('click', () => {
-            if (audioContextEars && audioContextEars.state === 'suspended') {
-                audioContextEars.resume();
-            }
         });
 
     </script>

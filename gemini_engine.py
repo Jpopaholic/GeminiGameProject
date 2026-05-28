@@ -52,10 +52,10 @@ except ImportError:
     HAS_MSS = False
 
 try:
-    import speech_recognition as sr
-    HAS_SPEECH = True
+    from faster_whisper import WhisperModel
+    HAS_WHISPER = True
 except ImportError:
-    HAS_SPEECH = False
+    HAS_WHISPER = False
 
 try:
     import pyaudio
@@ -156,6 +156,17 @@ class GeminiStreamEngine:
         self.speaking_state_file = os.path.join(self.base_dir, "player_profile", "speaking_state.json")
         self.set_speaking_state(False)
         self.live_session_active = False
+
+        # 初始化本地 faster-whisper 大腦模型 (全面離線、低延遲 ASR 轉譯通道)
+        self.whisper_model = None
+        if HAS_WHISPER:
+            try:
+                # 預設使用 "base" 模型，在 CPU 與 INT8 量化下兼顧速度與 Traditional Chinese 準確度
+                print(f"{YELLOW}[🔊 WHISPER] 正在載入本地離線 ASR 模型 (base)...{RESET}")
+                self.whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
+                print(f"{GREEN}[🔊 WHISPER] faster-whisper 離線大腦載入成功！{RESET}")
+            except Exception as e:
+                print(f"{RED}[🔊 WHISPER ERROR] 載入 faster-whisper 失敗: {e}{RESET}")
 
     def load_config(self):
         config_path = os.path.join(self.base_dir, "player_profile", "config.json")
@@ -738,11 +749,11 @@ class GeminiStreamEngine:
             self.main_loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self.main_loop)
             
-        if not (HAS_SPEECH and HAS_PYAUDIO):
-            print(f"{YELLOW}[EARS STATUS]{RESET} 系統未偵測到 SpeechRecognition 或 PyAudio。已自動降級為「純鍵盤輸入」模式。")
+        if not (HAS_WHISPER and HAS_PYAUDIO):
+            print(f"{YELLOW}[EARS STATUS]{RESET} 系統未偵測到 faster-whisper 或 PyAudio。已自動降級為「純鍵盤輸入」模式。")
             print(f"👉 提示：若要啟用雙通道實況聽覺，請在 macOS 終端機先安裝：")
             print(f"   1) brew install portaudio")
-            echo_cmd = "   2) python3 -m pip install --user pyaudio"
+            echo_cmd = "   2) python3 -m pip install --user pyaudio faster-whisper"
             print(echo_cmd)
             return
             
@@ -750,35 +761,20 @@ class GeminiStreamEngine:
         
         # 1. 麥克風人聲監聽通道 (Mic Channel)
         try:
-            self.recognizer = sr.Recognizer()
-            self.recognizer.dynamic_energy_threshold = True
+            self.mic_active = True
             
-            # 語音聆聽敏感度與反應速度極致優化 (大幅降低判定說話結束的延遲)
-            self.recognizer.pause_threshold = 0.5        # 說完話後的靜音等待時間 (預設 0.8s -> 降為 0.5s，縮短等待延遲)
-            self.recognizer.phrase_threshold = 0.2       # 開始說話的最小判定時間 (預設 0.3s -> 降為 0.2s)
-            self.recognizer.non_speaking_duration = 0.4  # 說話切片尾端的非說話保留長度 (預設 0.5s -> 降為 0.4s)
+            # 使用 lambda 函式定義停止監聽回標，符合收播安全關閉要求
+            def stop_listening(wait_for_stop=False):
+                self.mic_active = False
+            self.mic_stop_listening = stop_listening
             
-            self.mic = sr.Microphone()
-            
-            # 在背景以非阻塞執行緒持續監聽麥克風
-            def mic_audio_callback(recognizer, audio):
-                try:
-                    # 辨識台灣繁體中文人聲
-                    text = recognizer.recognize_google(audio, language="zh-TW").strip()
-                    if text:
-                        print(f"\n{YELLOW}[🎤 MIC HEARD]{RESET} {text}")
-                        # 呼叫主引擎問答
-                        asyncio.run_coroutine_threadsafe(query_callback(text), self.main_loop)
-                except sr.UnknownValueError:
-                    pass # 無法辨識的雜訊
-                except Exception:
-                    pass
-                    
-            # 調整環境噪聲適應
-            with self.mic as source:
-                self.recognizer.adjust_for_ambient_noise(source, duration=0.8)
-            self.mic_stop_listening = self.recognizer.listen_in_background(self.mic, mic_audio_callback)
-            print(f"{GREEN}[🎤 Mic Ear]{RESET} 麥克風人聲監聽通道已啟動！")
+            self.mic_thread = threading.Thread(
+                target=self._mic_listener_loop,
+                args=(query_callback,),
+                daemon=True
+            )
+            self.mic_thread.start()
+            print(f"{GREEN}[🎤 Mic Ear]{RESET} 本地麥克風人聲側聽系統 (PyAudio + faster-whisper VAD) 已啟動！")
         except Exception as e:
             print(f"{RED}[🎤 Mic Ear ERROR] 麥克風通道初始化失敗: {e}。語音喚醒失效，仍可使用鍵盤對答。{RESET}")
             
@@ -1338,112 +1334,150 @@ class GeminiStreamEngine:
         except asyncio.CancelledError:
             pass
 
-    async def start_ears_server(self):
-        """啟動背景 WebSocket 賽博耳朵音訊接收伺服器 (ws://localhost:9002)"""
-        if self.input_mode == "keyboard":
-            print(f"\n{YELLOW}[🔊 CYBER EARS] 當前輸入模式為 '純鍵盤模式'，語音側聽伺服器不啟動。{RESET}")
+    def _mic_listener_loop(self, query_callback):
+        """背景實體麥克風側聽與 VAD 辨識迴圈 (PyAudio + faster-whisper)"""
+        import pyaudio
+        import struct
+        import math
+        import collections
+        import time
+
+        # 開啟 PyAudio 音訊輸入
+        p = pyaudio.PyAudio()
+
+        FORMAT = pyaudio.paInt16
+        CHANNELS = 1
+        RATE = 16000
+        CHUNK_SIZE = 1024
+
+        try:
+            stream = p.open(
+                format=FORMAT,
+                channels=CHANNELS,
+                rate=RATE,
+                input=True,
+                frames_per_buffer=CHUNK_SIZE
+            )
+        except Exception as e:
+            print(f"{RED}[🎤 Mic Ear ERROR] 開啟 PyAudio 麥克風輸入流失敗: {e}{RESET}")
+            p.terminate()
             return
 
-        import websockets
-        
-        # 初始化音訊接收緩衝與狀態
-        self.pcm_buffer = bytearray()
-        self.last_audio_time = time.time()
-        self.is_processing_asr = False
-        
-        async def audio_handler(websocket):
-            print(f"\n{GREEN}[🔊 CYBER EARS] OBS Web 麥克風已連線就緒！{RESET}")
-            try:
-                async for message in websocket:
-                    if isinstance(message, bytes):
-                        # 如果助理正在說話，直接忽略接收到的聲音，防範喇叭回音干擾與重複觸發
-                        if getattr(self, 'is_speaking', False):
-                            self.pcm_buffer.clear()
-                            continue
-                            
-                        self.pcm_buffer.extend(message)
-                        self.last_audio_time = time.time()
-                        
-                        # 緩衝區防溢出限制：累積若超過 15 秒音訊，清空防止 OOM
-                        if len(self.pcm_buffer) > 16000 * 2 * 15:
-                            self.pcm_buffer.clear()
-            except websockets.exceptions.ConnectionClosed:
-                pass
-            finally:
-                print(f"\n{YELLOW}[🔊 CYBER EARS] OBS Web 麥克風連線已斷開。{RESET}")
-                
-        # 啟動非同步伺服器連線
-        try:
-            self.ears_server = await websockets.serve(audio_handler, "localhost", 9002)
-            print(f"{GREEN}[🔊 CYBER EARS] 語音側聽伺服器已成功開啟在 ws://localhost:9002 (輸入模式: {self.input_mode}){RESET}")
-            print(f" ├─ {YELLOW}💡 【麥克風權限與瀏覽器安全性提示】{RESET}")
-            print(f" ├─ 因瀏覽器隱私安全限制，Web Audio 麥克風必須在「安全上下文 (Secure Context)」中運作！")
-            print(f" ├─ {RED}警告：請勿{RESET} 直接雙擊點開網頁檔 (網址顯示 file://...)，這會導致瀏覽器基於安全原則直接封鎖麥克風！")
-            print(f" ├─ {GREEN}正確使用方案：{RESET}")
-            print(f" │  1. 請在您的專案根目錄另開終端機執行：{CYAN}python -m http.server 8000{RESET}")
-            print(f" │  2. 在瀏覽器或 OBS 瀏覽器來源載入網址：{UNDERLINE}http://localhost:8000/stream_overlay/index.html{RESET}")
-            print(f" │  3. 點擊彈出的「允許使用麥克風」，並在網頁內隨意點擊一下以啟用音訊上下文。")
-            print(f" └─────────────────────────────────────────────────────────────")
-            # 啟動非同步靜音檢測任務
-            self.vad_task = asyncio.create_task(self._vad_asr_loop())
-        except Exception as e:
-            print(f"{RED}[🔊 CYBER EARS ERROR] 開啟語音監聽伺服器失敗: {e}{RESET}")
+        # VAD 靜音判定設定
+        SILENCE_LIMIT = 0.8  # 靜音持續時間 (秒)
+        PRE_AUDIO_DURATION = 0.5  # 保留語音前的音訊長度 (秒)
 
-    async def _vad_asr_loop(self):
-        """實時靜音 VAD 檢測與 ASR 辨識觸發迴圈"""
-        while True:
+        silence_chunks = int(SILENCE_LIMIT * RATE / CHUNK_SIZE)
+        pre_audio_chunks = int(PRE_AUDIO_DURATION * RATE / CHUNK_SIZE)
+
+        pre_audio = collections.deque(maxlen=pre_audio_chunks)
+        recorded_chunks = []
+        silent_chunks_count = 0
+        state = "LISTENING"
+
+        # 初始能量基準值與動態適應
+        energy_threshold = 300.0
+
+        print(f"{GREEN}[🎤 Mic Ear]{RESET} 正在監聽實體麥克風... (VAD 能量基準值已設定)")
+
+        while self.mic_active:
             try:
-                await asyncio.sleep(0.1)
-                
-                now = time.time()
-                # 判定靜音：緩衝區有音訊數據，且最後一次接收音訊時間距離現在大於 0.8 秒 (說話完畢並靜音中)
-                if len(self.pcm_buffer) > 0 and (now - self.last_audio_time > 0.8) and not self.is_processing_asr:
-                    self.is_processing_asr = True
-                    
-                    # 拷貝音訊數據並重設緩衝區
-                    audio_to_process = bytes(self.pcm_buffer)
-                    self.pcm_buffer.clear()
-                    
-                    # 限制最少音訊長度為 0.5 秒 (以防環境噪聲誤判)
-                    # 16000Hz * 2bytes(Int16) * 0.5s = 16000 bytes
-                    if len(audio_to_process) >= 16000:
-                        import struct
-                        import math
-                        
-                        # 聲音數據分析 (長度, 資料大小, 平均音量 RMS)
-                        duration = len(audio_to_process) / 32000.0
-                        size_kb = len(audio_to_process) / 1024.0
-                        
-                        num_samples = len(audio_to_process) // 2
-                        samples = struct.unpack(f"{num_samples}h", audio_to_process)
-                        rms = 0.0
-                        if samples:
-                            rms = math.sqrt(sum(s**2 for s in samples) / len(samples))
-                        volume_pct = (rms / 32768.0) * 100
-                        
-                        # 即時於 CLI 介面輸出聲音分析結果
-                        print(f"\n{CYAN}[🔊 AUDIO ANALYZING]{RESET} 正在分析已接收的語音信號...")
-                        print(f" ├─ 音訊長度: {duration:.2f} 秒 | 封包大小: {size_kb:.1f} KB")
-                        print(f" └─ 平均音量: {rms:.1f} RMS ({volume_pct:.1f}%)")
-                        
-                        # 開始 ASR 轉譯並計算耗時
-                        t_start = time.time()
-                        text = await self._transcribe_audio(audio_to_process)
-                        latency = time.time() - t_start
-                        
-                        if text:
-                            print(f"{GREEN}[🎤 WEB MIC HEARD]{RESET} (辨識耗時: {latency:.2f}s) ─ {text}")
-                            # 執行引擎互動，秒級響應
-                            await self.execute_query(text)
-                        else:
-                            print(f"{YELLOW}[🎤 WEB MIC HEARD]{RESET} (辨識耗時: {latency:.2f}s) ─ [未偵測到有效語意/環境噪聲]")
-                            
-                    self.is_processing_asr = False
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                self.is_processing_asr = False
-                await asyncio.sleep(0.5)
+                # 助理發言期間直接不讀取/不處理聲音，完全避免喇訊回音與重複觸發
+                if getattr(self, 'is_speaking', False):
+                    try:
+                        stream.read(CHUNK_SIZE, exception_on_overflow=False)
+                    except Exception:
+                        pass
+                    pre_audio.clear()
+                    recorded_chunks.clear()
+                    state = "LISTENING"
+                    time.sleep(0.05)
+                    continue
+
+                # 讀取音訊封包
+                data = stream.read(CHUNK_SIZE, exception_on_overflow=False)
+                if not data:
+                    continue
+
+                # 計算該封包的 RMS 音量
+                count = len(data) // 2
+                shorts = struct.unpack(f"{count}h", data)
+                sum_squares = sum(s**2 for s in shorts)
+                rms = math.sqrt(sum_squares / count) if count > 0 else 0
+
+                # 適應環境噪聲底噪 (在 LISTENING 狀態下緩慢調整能量基準)
+                if state == "LISTENING":
+                    energy_threshold = energy_threshold * 0.98 + rms * 0.02
+                    energy_threshold = max(200.0, energy_threshold)
+
+                # 判斷觸發門檻 (底噪的 1.5 倍以上，且至少大於 400 RMS)
+                trigger_threshold = max(400.0, energy_threshold * 1.5)
+                trigger_threshold = min(trigger_threshold, 3000.0)
+
+                if rms > trigger_threshold:
+                    if state == "LISTENING":
+                        state = "RECORDING"
+                        recorded_chunks = list(pre_audio)
+                        recorded_chunks.append(data)
+                        silent_chunks_count = 0
+                    else:
+                        recorded_chunks.append(data)
+                        silent_chunks_count = 0
+                else:
+                    if state == "RECORDING":
+                        recorded_chunks.append(data)
+                        silent_chunks_count += 1
+                        if silent_chunks_count > silence_chunks:
+                            state = "LISTENING"
+                            audio_to_process = b"".join(recorded_chunks)
+                            recorded_chunks.clear()
+
+                            # 至少 0.5 秒以上的有效音訊長度才進行轉譯，防止環境噪聲誤判
+                            if len(audio_to_process) >= 16000 * 2 * 0.5:
+                                asyncio.run_coroutine_threadsafe(
+                                    self._process_mic_audio(audio_to_process, query_callback),
+                                    self.main_loop
+                                )
+                    else:
+                        pre_audio.append(data)
+
+            except Exception:
+                time.sleep(0.1)
+
+        # 關閉資源
+        try:
+            stream.stop_stream()
+            stream.close()
+            p.terminate()
+        except Exception:
+            pass
+
+    async def _process_mic_audio(self, audio_to_process, query_callback):
+        """非同步分析並辨識實體麥克風的音訊數據"""
+        import struct
+        import math
+
+        duration = len(audio_to_process) / 32000.0
+        size_kb = len(audio_to_process) / 1024.0
+
+        num_samples = len(audio_to_process) // 2
+        samples = struct.unpack(f"{num_samples}h", audio_to_process)
+        rms = math.sqrt(sum(s**2 for s in samples) / len(samples)) if len(samples) > 0 else 0
+        volume_pct = (rms / 32768.0) * 100
+
+        print(f"\n{CYAN}[🔊 AUDIO ANALYZING]{RESET} 正在分析已接收的實體麥克風語音信號...")
+        print(f" ├─ 音訊長度: {duration:.2f} 秒 | 封包大小: {size_kb:.1f} KB")
+        print(f" └─ 平均音量: {rms:.1f} RMS ({volume_pct:.1f}%)")
+
+        t_start = time.time()
+        text = await self._transcribe_audio(audio_to_process)
+        latency = time.time() - t_start
+
+        if text:
+            print(f"{GREEN}[🎤 MIC HEARD]{RESET} (辨識耗時: {latency:.2f}s) ─ {text}")
+            await query_callback(text)
+        else:
+            print(f"{YELLOW}[🎤 MIC HEARD]{RESET} (辨識耗時: {latency:.2f}s) ─ [未偵測到有效語意/環境噪聲]")
 
     async def _transcribe_audio(self, pcm_data):
         """將 PCM 二進位數據轉為 WAV 並非同步執行語意辨識"""
@@ -1451,11 +1485,14 @@ class GeminiStreamEngine:
         return await loop.run_in_executor(None, self._sync_transcribe, pcm_data)
 
     def _sync_transcribe(self, pcm_data):
-        """同步打包與進行 ASR 辨識 (台灣繁體中文 Google ASR)"""
+        """同步打包與進行 ASR 轉譯 (本地離線 faster-whisper ASR，支援多語言自動偵測)"""
         import io
         import wave
-        import speech_recognition as sr
-        
+
+        if not self.whisper_model:
+            print(f"{RED}[ASR ERROR] faster-whisper 未加載，無法辨識語音。{RESET}")
+            return None
+
         try:
             # 將 PCM 封裝成標準 WAV 位元組
             wav_buf = io.BytesIO()
@@ -1465,8 +1502,8 @@ class GeminiStreamEngine:
                 wav_file.setframerate(16000) # 16kHz
                 wav_file.writeframes(pcm_data)
             wav_buf.seek(0)
-            
-            # 同時寫入本地暫存音檔，提供給實況主播放，100% 精準排查與聽取麥克風音質、音量、取樣率
+
+            # 同時寫入本地暫存音檔，提供偵錯與 ASR 輸入
             import os
             debug_path = os.path.join(self.base_dir, "session_memories", "temp_mic.wav")
             try:
@@ -1475,14 +1512,25 @@ class GeminiStreamEngine:
                     f.write(wav_buf.getvalue())
             except Exception:
                 pass
-            
-            # 使用 SpeechRecognition 的 AudioFile 解析
-            recognizer = sr.Recognizer()
-            with sr.AudioFile(wav_buf) as source:
-                audio_data = recognizer.record(source)
-                
-            # 使用 Google Web ASR 辨識台灣繁體中文 (免費且極其高速準確，免 PyAudio compiled)
-            text = recognizer.recognize_google(audio_data, language="zh-TW").strip()
+
+            # 構建統一化 ASR 語氣引導 prompt ─ 結合語意設定 (language.txt)
+            prompt = ""
+            if hasattr(self, 'base_skill_language') and self.base_skill_language:
+                clean_lang = self.base_skill_language[:200].replace("\n", " ").replace("-", " ").strip()
+                prompt = f"以下是實況對話與常用詞習慣：{clean_lang}"
+            else:
+                prompt = "以下是台灣繁體中文的實況對話，包含一些網路梗跟口語。"
+
+            # 執行離線轉譯 ─ 採用多國語言自動偵測 (language=None)，極致通用！
+            segments, info = self.whisper_model.transcribe(
+                debug_path,
+                beam_size=5,
+                language=None,
+                initial_prompt=prompt
+            )
+
+            text = "".join(segment.text for segment in segments).strip()
             return text if len(text) > 0 else None
-        except Exception:
+        except Exception as e:
+            print(f"{RED}[ASR ERROR] faster-whisper 辨識出錯: {e}{RESET}")
             return None

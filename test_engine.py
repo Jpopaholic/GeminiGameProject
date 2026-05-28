@@ -18,14 +18,14 @@ if sys.platform.startswith('win'):
 # Ensure project root is in path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from gemini_engine import GeminiStreamEngine, HAS_GEMINI_SDK, HAS_SPEECH, HAS_PYAUDIO, HAS_OBS
+from gemini_engine import GeminiStreamEngine, HAS_GEMINI_SDK, HAS_WHISPER, HAS_PYAUDIO, HAS_OBS
 
 async def test_main():
     print("========== Engine Verification Start ==========")
     print(f"OS: {sys.platform}")
     print(f"Python Version: {sys.version}")
     print(f"HAS_GEMINI_SDK: {HAS_GEMINI_SDK}")
-    print(f"HAS_SPEECH: {HAS_SPEECH}")
+    print(f"HAS_WHISPER: {HAS_WHISPER}")
     print(f"HAS_PYAUDIO: {HAS_PYAUDIO}")
     print(f"HAS_OBS: {HAS_OBS}")
     

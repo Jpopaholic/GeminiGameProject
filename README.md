@@ -17,9 +17,9 @@
 
 ### 2. 👂 雙通道聽覺系統 (Dual Ears Listener)
 * **環路音訊監聽**：支援虛擬音訊裝置（如 `BlackHole 2ch`），可即時監聽遊戲大音量或特定背景音效。
-* **麥克風語音辨識**：利用 `speech_recognition` 與 `PyAudio` 捕捉實況主的語音，並在背景以非阻塞非同步執行緒進行精準辨識。
-  > [!NOTE]
-  > **重要補註**：語音輸入功能目前仍在實驗開發階段。為確保實況互動的高穩定性與回應速度，**目前建議以 CLI 終端機進行鍵盤文字輸入作為主要的互動管道**！
+* **本地離線語音辨識**：直接使用原生 `PyAudio` 進行語音輸入，並在本地運行極速、高精度的離線 **faster-whisper (base)** 語音辨識模型。
+  * **動態語意詞彙引導**：轉譯時會自動提取 `brain_profile/base_skills/language.txt` 中的網路梗與習慣俚語作為 AI 的字彙引導，精確辨識實況專用語與網路梗。
+  * **全球多國語言自動偵測**：系統預設啟用全球多國語言自動偵測機制，毫秒內即可自動判別中文、英文或日文等主流語言並進行高精度轉譯。
 
 
 ### 3. 🛡️ 1M TPM 流量安全防護罩
@@ -75,7 +75,7 @@ chmod +x setup_dependencies.sh
 ./setup_dependencies.sh
 ```
 
-*(此指令碼將會透過 Homebrew 安裝 `portaudio`，並藉由 `pip` 安裝 `pyaudio`、`google-genai`、`speechrecognition`、`obsws-python`、`mss` 與 `pillow` 等核心相依庫。)*
+*(此指令碼將會透過 Homebrew 安裝 `portaudio`，並藉由 `pip` 安裝 `pyaudio`、`google-genai`、`faster-whisper`、`obsws-python`、`mss` 與 `pillow` 等核心相依庫，完全免去瀏覽器側的麥克風權限要求。)*
 
 ### 2. 進行設定
 請複製 [player_profile/config.template.json](player_profile/config.template.json) 並命名為 `config.json`，同樣將 [player_profile/host_info.template.txt](player_profile/host_info.template.txt) 複製並命名為 `host_info.txt`：
@@ -114,7 +114,7 @@ python3 test_engine.py
 ```bash
 python3 main.py
 ```
-* 互動模式：支援 **「鍵盤 CLI 終端機打字輸入」** 與 **「OBS 網頁圖層麥克風語音側聽 (寫法 B)」** 雙工輸入。當您在 `config.json` 開啟 `"input_mode": "voice"` 或 `"both"` 時，引擎會自動在背景啟動語音側聽伺服器，此時只需載入 OBS 圖層（或以瀏覽器打開圖層頁面）並對著麥克風講話，暫停說話一秒內即可驅動語音對答！
+* 互動模式：支援 **「鍵盤 CLI 終端機打字輸入」** 與 **「本地實體麥克風語音側聽」** 雙工輸入。當您在 `config.json` 開啟 `"input_mode": "voice"` 或 `"both"` 時，引擎會在背景自動啟動本地麥克風 VAD 離線聽覺監聽（依賴 PyAudio + faster-whisper），此時只需對著您的實體麥克風說話，在停止說話不到一秒內即可自動觸發離線語音辨識與 Gemini 響應，對答如流！
 * 輸入 `status`：查看當前安全額度消耗、專案與 OBS 連線狀態。
 * 輸入 `switch vibe_coding` 或 `switch gw2`：動態切換實況主題。
 * 輸入 `exit`：安全提煉記憶並存檔收播。
@@ -125,7 +125,7 @@ python3 main.py
 2. 命名為 `Gemini_Logo`，勾選 **`本地檔案` (Local File)**。
 3. 點選瀏覽，選擇專案資料夾中的 [stream_overlay/index.html](stream_overlay/index.html)。
 4. 設定寬度為 **`500`**，高度為 **`500`**，點擊確定。
-5. （選擇性）若需要以實體麥克風/音響聲量感應（而非引擎輪詢），可點擊 OBS 來源視窗的「互動」按鈕，並點擊最上方的「模式切換」或雙擊 Logo 進行效果測試。
+5. （選擇性）若需要測試效果，可點擊 OBS 來源視窗的「互動」按鈕並雙擊 Logo，以模擬測試助理發言狀態與粒子特效，或點擊以觸發晃動互動！
 
 ---
 
