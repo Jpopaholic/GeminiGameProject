@@ -28,3 +28,8 @@ test_gameplay.jpg
 # Audio files
 *.wav
 session_memories/*.wav
+
+# Game Tools (Ignore all game specific plugin folder contents)
+game_tools/*
+!game_tools/README.md
+
